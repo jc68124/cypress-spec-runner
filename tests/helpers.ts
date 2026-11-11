@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 export async function fixture(t: { after: (fn: () => Promise<void>) => void }): Promise<string> {
@@ -12,5 +12,5 @@ export async function fixture(t: { after: (fn: () => Promise<void>) => void }): 
     await writeFile(path.join(root, 'cypress/e2e/features/Example.cy.ts'), '');
     await writeFile(path.join(root, 'cypress/e2e/features/helper.ts'), '');
     await writeFile(path.join(root, 'cypress.config.ts'), 'export default {};');
-    return root;
+    return realpath(root);
 }
