@@ -24,3 +24,5 @@ export function mergeRun(runs: RunJob[], next: RunJob): RunJob[] {
     if (current && current.revision > next.revision) return runs;
     return current ? runs.map(run => run.id === next.id ? next : run) : [...runs, next];
 }
+
+export const runLabels: Record<RunJob['status'], string> = { idle: 'Ready', queued: 'Queued', running: 'Running', stopping: 'Stopping', passed: 'Passed', failed: 'Failed', stopped: 'Stopped', cancelled: 'Cancelled' };
