@@ -1,4 +1,5 @@
 export const browsers = ['chrome', 'electron', 'edge', 'firefox'] as const;
+export type Browser = typeof browsers[number];
 export interface RunProfile {
     id: string;
     name: string;
@@ -14,9 +15,11 @@ export interface ProjectConfig {
     specPattern: string[];
     excludeSpecPattern: string[];
     envFile: string | null;
+    browsers?: Browser[];
     profiles: RunProfile[];
     defaultProfile: string;
 }
+export function availableBrowsers(config: ProjectConfig): readonly Browser[] { return config.browsers ?? browsers; }
 export interface Category { id: string; name: string; specs: string[] }
 export interface CategoryFile { version: 1; categories: Category[] }
 export interface Project {
@@ -29,7 +32,7 @@ export interface Project {
     initialized: boolean;
 }
 export interface SaveResult { project: Project; changedFiles: string[] }
-export interface RunOptions { specs: string[]; profile: string; browser: typeof browsers[number]; headed: boolean }
+export interface RunOptions { specs: string[]; profile: string; browser: Browser; headed: boolean }
 export interface RunState {
     status: 'idle' | 'running' | 'stopping' | 'passed' | 'failed' | 'stopped';
     output: string;
@@ -49,7 +52,7 @@ export interface RunnerAPI {
     preview(options: RunOptions): Promise<string>;
     run(options: RunOptions): Promise<RunState>;
     stop(): Promise<void>;
-    saveLog(): Promise<boolean>;
+    openLog(): Promise<void>;
     state(): Promise<RunState>;
     onRunState(listener: (state: RunState) => void): () => void;
     copy(text: string): Promise<void>;

@@ -12,6 +12,7 @@
         "specPattern": { "type": "array", "minItems": 1, "items": { "type": "string" } },
         "excludeSpecPattern": { "type": "array", "items": { "type": "string" } },
         "envFile": { "type": ["string", "null"], "description": "Local environment file, excluded from Git." },
+        "browsers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["chrome", "electron", "edge", "firefox"] }, "description": "Browsers available in this project. Omit to allow all supported browsers." },
         "defaultProfile": { "type": "string" },
         "profiles": {
             "type": "array", "minItems": 1,
