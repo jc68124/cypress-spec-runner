@@ -95,6 +95,8 @@ Custom reporters and plugins may write to their own locations. Configure their o
 
 ## Custom launch options
 
+Argument arrays and environment objects use a monospace JSON editor. Valid JSON formats automatically with four spaces when leaving the field or saving; **Format JSON** or Ctrl/Cmd+Shift+F also formats it. Tab inserts four spaces or indents selected lines, Shift+Tab outdents, and Escape then Tab leaves the editor. Syntax and expected array/object shapes are checked inline; malformed text stays available for repair and cannot be saved. Advanced discovery patterns stay one pattern per line, with surrounding whitespace removed on blur/save.
+
 Profiles have an optional JSON list of `args`, available under **Advanced arguments and environment variables**. Each item is a separate Cypress argument, for example `["--config", "video=false"]`. Arguments are passed directly without a shell. Choose flags supported by the project's installed Cypress version. The runner controls `--spec` and `--project`; profiles cannot override them. The app always runs end-to-end specs in this first release.
 
 The optional profile `baseUrl` overrides the Cypress setting for that run. Leave it blank to use Cypress's own value. `configFile` is relative to the project root; `null` leaves Cypress's default discovery in place.
