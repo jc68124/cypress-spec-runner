@@ -219,6 +219,11 @@ app.whenReady().then(async () => {
         await wait(()=>tab(6)&&tab(7)&&tab(8)&&tab(9));
         assert(tab(6).textContent.includes('Running')&&tab(8).textContent.includes('Running')&&tab(7).textContent.includes('Queued')&&tab(9).textContent.includes('Queued'),'Matrix did not apply per-profile concurrency');
         assert(document.querySelector('[aria-label="Run group summary"]').textContent.includes('2 profiles × 2 browsers = 4 runs'),'Matrix context is missing from output');
+        button('View matrix').click();await wait(()=>document.querySelector('[role=dialog] table'));
+        assert(document.querySelectorAll('[role=dialog] tbody tr').length===2 && document.querySelectorAll('[role=dialog] thead th').length===3,'Matrix did not display profile rows and browser columns');
+        document.querySelector('[aria-label="Other environment on electron: Running"]').click();await wait(()=>!document.querySelector('[role=dialog]'));
+        assert(document.querySelector('[role=tabpanel]').textContent.includes('Other environment'),'Matrix cell did not open the selected result');
+        tab(6).click();await wait(()=>document.querySelector('[role=tabpanel]').textContent.includes('Test environment'));
         button('Edit run details').click();
         await wait(()=>document.getElementById('run-name'));
         fill('run-name','Checkout verification');fill('run-notes','Check the updated selector.');
@@ -245,6 +250,7 @@ app.whenReady().then(async () => {
         tab(7).click();await wait(()=>button('Cancel queued run'));button('Cancel queued run').click();await wait(()=>!tab(7));
         tab(9).click();await wait(()=>button('Cancel queued run'));button('Cancel queued run').click();await wait(()=>!tab(9));
         assert(document.querySelector('[aria-label="Group results"]').textContent.includes('2 cancelled'),'Cancelled matrix rows were not retained in totals');
+        button('View matrix').click();await wait(()=>document.querySelector('[role=dialog] table'));assert(document.querySelector('[role=dialog]').textContent.includes('Cancelled') && document.querySelector('[role=dialog]').textContent.includes('Row removed'),'Matrix lost removed cancellation results');button('Done',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));
         tab(6).click();await wait(()=>button('Stop run'));button('Stop run').click();await wait(()=>tab(6).textContent.includes('Stopped'));
         tab(8).click();await wait(()=>button('Stop run'));button('Stop run').click();await wait(()=>tab(8).textContent.includes('Stopped'));
         document.querySelector('[aria-label="Close run 6"]').click();await wait(()=>!tab(6));
