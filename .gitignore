@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+*.tgz
+.spec-runner/local.json
+spec-runner-logs/
+.env
+.env.local
+.pnpm-store/

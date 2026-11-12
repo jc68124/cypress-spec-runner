@@ -1,0 +1,47 @@
+name: Validate package
+on:
+  pull_request:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --global pnpm@11.25.0
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build
+      - run: pnpm test
+      - run: npm pack --ignore-scripts
+      - run: npm run smoke
+      - run: pnpm run smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cypress-spec-runner-package-${{ matrix.os }}
+          path: '*.tgz'
+          if-no-files-found: error
+
+  devcontainer:
+    name: Validate devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build devcontainer and run project checks
+        uses: devcontainers/ci@v0.3
+        with:
+          push: never
+          runCmd: |
+            pnpm build
+            pnpm test
+            npm pack --ignore-scripts
+            pnpm run smoke

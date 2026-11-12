@@ -1,0 +1,71 @@
+{
+    "name": "@jc68124/cypress-spec-runner",
+    "version": "0.1.0",
+    "description": "A configurable desktop companion for selecting, grouping, and running Cypress specs.",
+    "license": "MIT",
+    "bin": {
+        "cypress-spec-runner": "bin/cypress-spec-runner.cjs"
+    },
+    "main": "out/electron/main.js",
+    "files": [
+        "bin",
+        "out/electron",
+        "out/shared",
+        "dist",
+        "schema.json",
+        "docs",
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md"
+    ],
+    "engines": {
+        "node": ">=22.12.0"
+    },
+    "packageManager": "pnpm@11.25.0",
+    "scripts": {
+        "check": "tsc6 -p tsconfig.json && tsc6 -p tsconfig.electron.json --noEmit",
+        "build": "pnpm check && tsc6 -p tsconfig.electron.json && vite build",
+        "test": "tsc6 -p tsconfig.electron.json && node --test out/tests/*.test.js",
+        "prepack": "pnpm build",
+        "smoke": "node scripts/package-smoke.cjs",
+        "changeset": "changeset",
+        "version-packages": "changeset version && pnpm install --lockfile-only --ignore-scripts",
+        "release": "changeset publish"
+    },
+    "dependencies": {
+        "electron": "45.3.0",
+        "glob": "13.0.6"
+    },
+    "peerDependencies": {
+        "cypress": ">=12"
+    },
+    "peerDependenciesMeta": {
+        "cypress": {
+            "optional": true
+        }
+    },
+    "devDependencies": {
+        "@changesets/cli": "2.31.1",
+        "@headlessui/react": "2.2.10",
+        "@tailwindcss/vite": "4.3.5",
+        "@types/node": "24.13.6",
+        "@types/react": "19.3.0",
+        "@types/react-dom": "19.3.0",
+        "@vitejs/plugin-react": "6.3.0",
+        "anser": "2.3.5",
+        "react": "19.3.1",
+        "react-dom": "19.3.1",
+        "tailwindcss": "4.3.5",
+        "typescript": "npm:@typescript/typescript6@6.0.2",
+        "vite": "8.3.8"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/jc68124/cypress-spec-runner.git"
+    },
+    "publishConfig": {
+        "access": "public",
+        "provenance": true,
+        "registry": "https://registry.npmjs.org/"
+    }
+}
