@@ -81,6 +81,10 @@ The **Runs** view groups each submission with its profiles, browsers, spec count
 
 Shared configuration/category saves are locked while runs are active or queued. Run selections, browser/profile choices, and personal output preferences remain editable. After changing scheduling settings, save and commit the listed project files as usual.
 
+### Rerunning results
+
+Once a run finishes, **Rerun run** creates a fresh run for the same specs, profile and browser. **Rerun group** repeats every original combination, including cancelled combinations; **Rerun failed** repeats only failed combinations, even if their output rows were closed. Failed pairs are preserved exactly rather than expanded into another full matrix. Names and notes carry forward, current shared project settings are used, and original results remain unchanged. New artifacts and logs are isolated. Removed profiles or specs must be fixed before the whole rerun batch can start.
+
 ### Run files and custom reporters
 
 Each run uses its own `spec-runner-logs/<run-id>/` directory. The runner passes unique `screenshotsFolder`, `videosFolder`, and `downloadsFolder` values to Cypress while retaining other profile `--config` overrides. Tests should use `Cypress.config('downloadsFolder')` rather than a hard-coded download location.

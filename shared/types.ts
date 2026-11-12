@@ -52,6 +52,7 @@ export interface RunBatch {
     browsers: Browser[];
     specCount: number;
     statuses: Record<string, RunJob['status']>;
+    targets: { id: string; profileId: string; browser: Browser }[];
     removed?: boolean;
 }
 export interface MatrixResult { batch: RunBatch; runs: RunJob[] }
@@ -94,6 +95,8 @@ export interface RunnerAPI {
     preview(options: RunOptions): Promise<string>;
     run(options: RunOptions): Promise<RunJob>;
     runMatrix(options: MatrixOptions): Promise<MatrixResult>;
+    rerun(id: string): Promise<MatrixResult>;
+    rerunBatch(id: string, mode: 'all' | 'failed'): Promise<MatrixResult>;
     previewMatrix(options: MatrixOptions): Promise<string>;
     batches(): Promise<RunBatch[]>;
     updateRun(id: string, details: RunDetails): Promise<RunJob>;

@@ -250,6 +250,11 @@ app.whenReady().then(async () => {
         document.querySelector('[aria-label="Close run 6"]').click();await wait(()=>!tab(6));
         assert(document.querySelector('[aria-label="Group results"]').textContent.includes('2 stopped'),'Closing a finished row changed matrix totals');
         button('Close group').click();await wait(()=>!tab(8));
+        tab(1).click();await wait(()=>button('Rerun run'));button('Rerun run').click();await wait(()=>tab(10));
+        await window.specRunnerFixture.finish('run-10','failed');await wait(()=>button('Rerun failed')&&!button('Rerun failed').disabled);
+        button('Rerun failed').click();await wait(()=>tab(11));
+        button('Stop run').click();await wait(()=>tab(11).textContent.includes('Stopped'));
+        button('Rerun group').click();await wait(()=>tab(12));button('Stop run').click();await wait(()=>tab(12).textContent.includes('Stopped'));
         return 'Setup, profile editing, category selection/editing, commit reminders, personal preferences, accessible help, browser restrictions, independent run tabs, queue cancellation, concurrency settings, and 1080p density passed.';
     })()`);
     if (process.env.SPEC_RUNNER_UI_SCREENSHOT) { win.show(); await new Promise(resolve => setTimeout(resolve, 1500)); require('node:fs').writeFileSync(process.env.SPEC_RUNNER_UI_SCREENSHOT, (await win.webContents.capturePage()).toPNG()); }
