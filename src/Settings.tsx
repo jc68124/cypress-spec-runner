@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Project, ProjectConfig, RunProfile, RunOptions } from '../shared/types';
-import { browsers } from '../shared/types';
+import { availableBrowsers, browsers } from '../shared/types';
 import { Button, Help } from './ui';
 
 export function Settings({ project, disabled, onSave, browser, setBrowser, follow, setFollow }: {
@@ -40,6 +40,11 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
             <div className="grid gap-4 md:grid-cols-2"><div><label htmlFor="config-file" className="field-label">Cypress configuration file</label><input id="config-file" disabled={busy} value={draft.configFile ?? ''} placeholder="Automatic" onChange={event => setDraft({ ...draft, configFile: event.target.value || null })} /><p className="field-description mt-2">Relative to the project root. Leave blank for Cypress’s default discovery.</p></div>
                 <div><label htmlFor="env-file" className="field-label">Local environment file <Help label="About local environment files">The file is read only when a run starts. Its values stay local and are not shown in the interface. Existing process variables take priority.</Help></label><input id="env-file" disabled={busy} value={draft.envFile ?? ''} placeholder="Optional, e.g. .env" onChange={event => setDraft({ ...draft, envFile: event.target.value || null })} /><p className="field-description mt-2">Store credentials here or in your existing shell environment. Keep the environment file out of Git.</p></div></div>
         </section>
+        <section className="settings-section space-y-4" aria-labelledby="browsers-title">
+            <h3 id="browsers-title" className="font-semibold text-white">Available browsers <Help label="About available browsers">Choose which browsers people can select for this project. Browsers must be installed locally; this does not install or detect them. Save and commit the project configuration to share this list.</Help></h3>
+            <p className="field-description">Enable at least one browser. Only enabled browsers appear in run controls and personal preferences.</p>
+            <div className="flex flex-wrap gap-x-6 gap-y-3">{browsers.map(value => <label key={value} className="flex items-center gap-3 text-sm"><input type="checkbox" aria-label={`Enable ${value}`} checked={availableBrowsers(draft).includes(value)} disabled={busy || (availableBrowsers(draft).length === 1 && availableBrowsers(draft).includes(value))} onChange={event => setDraft(current => ({ ...current, browsers: event.target.checked ? browsers.filter(browser => browser === value || availableBrowsers(current).includes(browser)) : availableBrowsers(current).filter(browser => browser !== value) }))} />{value}</label>)}</div>
+        </section>
         <section className="settings-section space-y-4" aria-labelledby="profiles-title">
             <div className="flex items-center justify-between gap-4"><h3 id="profiles-title" className="font-semibold text-white">Run profiles <Help label="About run profiles">Profiles describe how Cypress starts: base URL, extra arguments, and environment variables. Create profiles for the environments your project uses.</Help></h3><Button small disabled={busy} onClick={addProfile}>Add profile</Button></div>
             {draft.profiles.map(profile => <div key={profile.id} className="space-y-4 rounded-lg border border-white/10 p-4">
@@ -58,7 +63,7 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-4"><p className="max-w-xl text-xs leading-5 text-zinc-400">Save writes shared project files. Commit the files listed in the save reminder to share your changes.</p><Button kind="primary" disabled={busy} onClick={() => void save()}>{saving ? 'Saving…' : project.initialized ? 'Save project settings' : 'Save and finish setup'}</Button></div>
         <section className="settings-section space-y-4"><h3 className="font-semibold text-white">Personal preferences <span className="ml-2 text-xs font-normal text-zinc-400">Saved locally</span></h3><p className="field-description">These apply immediately for this checkout and do not need committing.</p>
-            <div><label htmlFor="preferred-browser" className="field-label">Preferred browser</label><select id="preferred-browser" value={browser} onChange={event => setBrowser(event.target.value as RunOptions['browser'])}>{browsers.map(value => <option key={value} value={value}>{value}</option>)}</select></div>
+            <div><label htmlFor="preferred-browser" className="field-label">Preferred browser</label><select id="preferred-browser" value={browser} onChange={event => setBrowser(event.target.value as RunOptions['browser'])}>{availableBrowsers(project.config).map(value => <option key={value} value={value}>{value}</option>)}</select></div>
             <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} />Follow new output automatically</label>
         </section>
     </div>;

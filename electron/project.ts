@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { access, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { glob } from 'glob';
-import { browsers, type Category, type CategoryFile, type Project, type ProjectConfig, type RunOptions, type SaveResult } from '../shared/types';
+import { availableBrowsers, browsers, type Category, type CategoryFile, type Project, type ProjectConfig, type RunOptions, type SaveResult } from '../shared/types';
 
 export const configPath = 'spec-runner.config.json';
 export const categoryPath = '.spec-runner/categories.json';
@@ -25,7 +25,7 @@ export async function defaults(root: string): Promise<ProjectConfig> {
     }
     return { $schema: `./node_modules/${require('../../package.json').name}/schema.json`, version: 1, name: 'Cypress project', configFile, specPattern: ['cypress/e2e/**/*.cy.{js,jsx,ts,tsx}'],
         excludeSpecPattern: ['**/node_modules/**', '**/snapshots/**', '**/__snapshots__/**', '**/__image_snapshots__/**'],
-        envFile: '.env', profiles: [{ id: 'default', name: 'Default', args: [], env: {} }], defaultProfile: 'default' };
+        envFile: '.env', browsers: [...browsers], profiles: [{ id: 'default', name: 'Default', args: [], env: {} }], defaultProfile: 'default' };
 }
 export function validateConfig(value: unknown): ProjectConfig {
     const config = value as ProjectConfig;
@@ -37,6 +37,8 @@ export function validateConfig(value: unknown): ProjectConfig {
         if (!Array.isArray(config[field]) || (field === 'specPattern' && !config[field].length)
             || config[field].some(pattern => !relativePath(pattern) || pattern.startsWith('!'))) throw Error(`${field} must contain project-relative glob patterns. Use exclusions to omit files.`);
     }
+    if (config.browsers !== undefined && (!Array.isArray(config.browsers) || !config.browsers.length
+        || config.browsers.some(browser => !browsers.includes(browser)) || new Set(config.browsers).size !== config.browsers.length)) throw Error('Choose at least one supported browser, without duplicates.');
     if (!Array.isArray(config.profiles) || !config.profiles.length) throw Error('Create at least one run profile.');
     const ids = new Set<string>();
     const names = new Set<string>();
@@ -51,7 +53,7 @@ export function validateConfig(value: unknown): ProjectConfig {
         if (profile.baseUrl !== undefined && typeof profile.baseUrl !== 'string') throw Error('Base URL must be text.');
     }
     if (typeof config.defaultProfile !== 'string' || !ids.has(config.defaultProfile)) throw Error('Choose an existing default profile.');
-    return { ...config, name: config.name.trim(), profiles: config.profiles.map(profile => ({ ...profile, name: profile.name.trim() })) };
+    return { ...config, name: config.name.trim(), browsers: [...availableBrowsers(config)], profiles: config.profiles.map(profile => ({ ...profile, name: profile.name.trim() })) };
 }
 export function validateCategories(value: unknown): CategoryFile {
     const file = value as CategoryFile;
@@ -182,7 +184,7 @@ export async function validateRun(root: string, value: unknown): Promise<RunOpti
     const options = value as RunOptions;
     const project = await loadProject(root);
     if (!options || !Array.isArray(options.specs) || !options.specs.length || options.specs.some(spec => !literalSpec(spec))) throw Error('Select at least one valid spec file.');
-    if (!project.config.profiles.some(profile => profile.id === options.profile) || !browsers.includes(options.browser) || typeof options.headed !== 'boolean') throw Error('Invalid profile, browser, or run options.');
+    if (!project.config.profiles.some(profile => profile.id === options.profile) || !availableBrowsers(project.config).includes(options.browser) || typeof options.headed !== 'boolean') throw Error('Invalid profile, browser, or run options.');
     if (options.specs.some(spec => !project.specs.includes(spec))) throw Error('A selected spec no longer exists or does not match the configured patterns. Refresh your specs.');
     return { ...options, specs: [...new Set(options.specs)].sort() };
 }

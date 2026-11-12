@@ -1,5 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, type IpcMainInvokeEvent } from 'electron';
-import { copyFile } from 'node:fs/promises';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
 import { isAppDocumentUrl } from './app-url';
@@ -38,13 +37,11 @@ app.whenReady().then(async () => {
     handle('run:start', (options: RunOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runner.run(root, options); });
     handle('run:stop', () => runner.stop());
     handle('run:state', () => runner.state);
-    handle('run:save-log', async () => {
+    handle('run:open-log', async () => {
         const state = runner.state;
-        if (runner.active || !state.logPath || state.logError) throw Error(state.logError ?? 'Finish the run before saving its full log.');
-        const result = await dialog.showSaveDialog(window, { title: 'Save full run log', defaultPath: path.basename(state.logPath), filters: [{ name: 'Log files', extensions: ['log'] }] });
-        if (result.canceled || !result.filePath) return false;
-        if (path.resolve(result.filePath) !== path.resolve(state.logPath)) await copyFile(state.logPath, result.filePath);
-        return true;
+        if (runner.active || !state.logPath || state.logError) throw Error(state.logError ?? 'Finish the run before opening its full log.');
+        const error = await shell.openPath(state.logPath);
+        if (error) throw Error(`Unable to open the log: ${error}`);
     });
     handle('clipboard:copy', (text: string) => {
         if (typeof text !== 'string' || text.length > 250_000) throw Error('Invalid clipboard content.');
