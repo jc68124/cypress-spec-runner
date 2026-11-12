@@ -98,3 +98,7 @@ Categories can overlap. Unticking a category removes its files from the next sel
 ## Logs
 
 Each run gets a unique timestamp/profile log inside its own `spec-runner-logs/<run-id>/` directory. Logs are streamed with disk backpressure and are flushed before the run finishes or Stop returns. Files are retained until manually deleted. After a run finishes or stops, **Open log** opens its existing file in your default application. The action is available after queued writes have finished; it does not ask you to save another copy. If the system cannot open the file, the app reports the error. Logs remain separate from the 500,000-character live output buffer. A write failure is reported without changing Cypress's exit result; if a log cannot be created, the run does not start.
+
+## Editing while runs are active
+
+While runs are active or queued, shared project settings, category editing, and spec refresh are locked. A notice in Settings and Categories explains the lock and links to Runs. Finish or stop active runs and cancel queued runs to unlock editing. Spec selection and personal preferences remain available throughout.
