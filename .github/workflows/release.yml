@@ -1,0 +1,60 @@
+name: Release package
+on:
+  workflow_run:
+    workflows: ['Validate package']
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-master
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Version or publish package
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'master' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --global pnpm@11.25.0
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build
+      - name: Check validated commit is still current
+        id: revision
+        shell: bash
+        run: |
+          git fetch --no-tags origin master
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping release: a newer commit on master must pass CI first."
+          fi
+      - name: Create version PR or publish to npm
+        if: steps.revision.outputs.current == 'true'
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1
+        with:
+          version: pnpm version-packages
+          publish: pnpm release
+          title: Release Cypress Spec Runner
+          commit: 'chore: version package'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -17,14 +17,14 @@ Changesets manages npm versions and changelogs. This publishes the npm package; 
    npm publish --access public --provenance=false
    ```
 
-   This first local publish uses your npm account and any required two-factor authentication; CI adds provenance on subsequent releases. Check the packed contents before publishing. Do this before merging the first generated version PR; the initial changeset then releases the next patch version.
+   This first local publish uses your npm account and any required two-factor authentication; CI adds provenance on subsequent releases. Check the packed contents before publishing. Complete this setup before merging a generated version PR. If the workflow already tried to publish the initial version before setup, rerun it afterward.
 3. In the npm package's **Settings → Trusted Publisher**, select GitHub Actions and enter:
 
    | Field | Value |
    | --- | --- |
    | Organization or user | `jc68124` |
    | Repository | `cypress-spec-runner` |
-   | Workflow filename | `ci.yml` |
+   | Workflow filename | `release.yml` |
    | Environment | Leave empty |
    | Allowed actions | Enable publishing with `npm publish` |
 
@@ -34,8 +34,8 @@ Changesets manages npm versions and changelogs. This publishes the npm package; 
 
 Run `pnpm changeset`, select the package and version bump, and write a brief user-facing summary. Commit the generated `.changeset/*.md` file with the implementation. Documentation-only changes do not need a package release.
 
-After changes merge to `master` and Windows, Linux, and devcontainer checks pass, the release job opens or updates **Release Cypress Spec Runner**. This PR updates the package version and `CHANGELOG.md` and consumes the pending changesets. Review and merge it when ready. After the merged commit passes those same checks, the job publishes the new npm version and creates a GitHub release.
+After changes merge to `master` and Windows, Linux, and devcontainer checks pass, the separate [Release package workflow](../.github/workflows/release.yml) opens or updates **Release Cypress Spec Runner**. This PR updates the package version and `CHANGELOG.md` and consumes the pending changesets. Review and merge it when ready. After the merged commit passes those same checks, the job publishes the new npm version and creates a GitHub release.
 
-Publishing only runs on pushes to `master`; pull request checks cannot publish. If publication fails, fix the npm trusted publisher settings if needed and rerun the failed release job in GitHub Actions. An already published version is skipped. Version PRs created with GitHub's built-in token may not trigger PR workflows; all checks run again after merge before publication.
+The release workflow starts when **Validate package** completes successfully for a push to `master`, and checks out the exact validated commit. Failed checks, pull request runs, other branches, and commits superseded on `master` cannot publish. This workflow becomes active once `release.yml` is merged into the default branch. If publication fails, fix the npm trusted publisher settings if needed and rerun the failed release job in GitHub Actions. An already published version is skipped. Version PRs created with GitHub's built-in token may not trigger PR workflows; all checks run again after merge before publication.
 
 `pnpm version-packages` previews the version changes locally and modifies files. `pnpm changeset status` shows the pending release without changing anything. `pnpm release` publishes unpublished versions and is intended for the release job, not for a local preview.
