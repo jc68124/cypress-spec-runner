@@ -235,6 +235,13 @@ app.whenReady().then(async () => {
         const terminal=document.querySelector('pre');
         const followOutput=()=>[...document.querySelectorAll('label')].find(label=>label.textContent.trim()==='Follow output').querySelector('input');
         await wait(()=>terminal.scrollTop>0);
+        window.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}));await wait(()=>document.getElementById('output-find'));
+        fill('output-find','Output line');await wait(()=>document.querySelector('[aria-label="Find matches"]').textContent==='1 of 200');
+        assert(CSS.highlights.get('runner-find').size===200,'Search did not highlight literal matches');
+        document.querySelector('[aria-label="Next match"]').click();await wait(()=>document.querySelector('[aria-label="Find matches"]').textContent==='2 of 200');
+        document.querySelector('[aria-label="Previous match"]').click();await wait(()=>document.querySelector('[aria-label="Find matches"]').textContent==='1 of 200');
+        document.getElementById('output-find').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(()=>!document.getElementById('output-find'));
+        button('Jump to latest').click();await wait(()=>followOutput().checked);
         terminal.scrollTop-=150;terminal.dispatchEvent(new Event('scroll',{bubbles:true}));
         await wait(()=>!followOutput().checked);
         const scrollPosition=terminal.scrollTop;
