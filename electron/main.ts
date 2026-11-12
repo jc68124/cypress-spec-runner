@@ -1,7 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, type IpcMainInvokeEvent } from 'electron';
 import { copyFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { isAppDocumentUrl } from './app-url';
 import { commandPreview, findProject, initializeProject, loadProject, saveCategories, saveConfig, validateRun } from './project';
 import { Runner } from './runner';
 import type { Category, ProjectConfig, RunOptions } from '../shared/types';
@@ -10,11 +11,11 @@ let window: BrowserWindow;
 let root: string;
 let saving = false;
 let quitting = false;
-const html = path.resolve(__dirname, '../../dist/index.html');
+const html = realpathSync.native(path.resolve(__dirname, '../../dist/index.html'));
 const runner = new Runner(state => { if (window && !window.isDestroyed()) window.webContents.send('run:changed', state); });
 function handle(channel: string, handler: (...args: any[]) => unknown): void {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-        if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame?.url !== pathToFileURL(html).href) throw Error('Untrusted application window.');
+        if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !isAppDocumentUrl(event.senderFrame?.url, html)) throw Error('Untrusted application window.');
         return handler(...args);
     });
 }
@@ -53,7 +54,7 @@ app.whenReady().then(async () => {
         backgroundColor: '#09090b', autoHideMenuBar: true,
         webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    window.webContents.on('will-navigate', (event, url) => { if (url !== pathToFileURL(html).href) event.preventDefault(); });
+    window.webContents.on('will-navigate', (event, url) => { if (!isAppDocumentUrl(url, html)) event.preventDefault(); });
     window.on('close', event => { if (runner.active && !quitting) { event.preventDefault(); app.quit(); } });
     await window.loadFile(html);
 }).catch(error => { dialog.showErrorBox('Unable to open Cypress Spec Runner', String(error)); app.exit(1); });
