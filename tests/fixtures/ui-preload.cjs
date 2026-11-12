@@ -15,14 +15,14 @@ function emit(job) {
 function remove(job) { jobs = jobs.filter(item => item.id !== job.id); callback({ ...job, removed: true, revision: job.revision + 1 }); }
 function runMatrix(options) {
     const batch = { id: 'batch-' + (++groupSequence), revision: 0, name: (options.profiles.length * options.browsers.length > 1 ? 'Matrix #' : 'Run #') + groupSequence,
-        createdAt: Date.now(), profiles: options.profiles.map(id => ({ id, name: project.config.profiles.find(profile => profile.id === id).name })), browsers: [...options.browsers], specCount: options.specs.length, statuses: {} };
+        createdAt: Date.now(), profiles: options.profiles.map(id => ({ id, name: project.config.profiles.find(profile => profile.id === id).name })), browsers: [...options.browsers], specCount: options.specs.length, statuses: {}, targets: [] };
     const entries = options.profiles.flatMap(profile => options.browsers.map(browser => {
         const number = ++sequence, id = 'run-' + number, profileName = project.config.profiles.find(item => item.id === profile).name;
         const job = { ...options, profile, browser, specs: [...options.specs], id, number, revision: 0, batchId: batch.id, name: profileName + ' · ' + browser, notes: '', profileId: profile, profileName,
             status: 'queued', output: '', command: 'cypress run --e2e', exitCode: null, outputTruncated: false, outputStartLine: 0, logError: null,
             logPath: '/example-project/spec-runner-logs/' + id + '/example.log', artifactDirectory: '/example-project/spec-runner-logs/' + id,
             createdAt: Date.now(), startedAt: null, finishedAt: null, waitReason: null };
-        batch.statuses[id] = 'queued'; return job;
+        batch.statuses[id] = 'queued'; batch.targets.push({ id, profileId: profile, browser }); return job;
     }));
     groups.push(batch); jobs.push(...entries); batchCallback({ ...batch }); entries.forEach(emit); pump(); return { batch, runs: entries };
 }
@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('specRunner', {
     preview: async () => 'cypress run --e2e --spec example', copy: async () => {}, openLog: async id => { project.logOpened = id; }, copyOutput: async id => { project.copiedOutput = jobs.find(job => job.id === id).output; },
     run: async options => runMatrix({ ...options, profiles: [options.profile], browsers: [options.browser] }).runs[0],
     runMatrix: async options => runMatrix(options),
+    rerun: async id => { const job=jobs.find(job=>job.id===id);return runMatrix({...job,profiles:[job.profileId],browsers:[job.browser]}); },
+    rerunBatch: async id => { const group=groups.find(group=>group.id===id);return runMatrix({specs:specs.slice(0,group.specCount),profiles:group.profiles.map(profile=>profile.id),browsers:group.browsers,headed:false}); },
     previewMatrix: async () => 'cypress run --e2e --spec example',
     batches: async () => groups,
     onBatchState: listener => { batchCallback = listener; return () => {}; },
@@ -56,4 +58,4 @@ contextBridge.exposeInMainWorld('specRunner', {
     closeRun: async id => { remove(jobs.find(job => job.id === id)); }
 
 });
-contextBridge.exposeInMainWorld('specRunnerFixture', { append: (id, text) => { const job = jobs.find(job => job.id === id); job.output += text; emit(job); } });
+contextBridge.exposeInMainWorld('specRunnerFixture', { finish: (id, status) => { const job = jobs.find(job => job.id === id); job.status = status; job.finishedAt = Date.now(); emit(job); pump(); }, append: (id, text) => { const job = jobs.find(job => job.id === id); job.output += text; emit(job); } });

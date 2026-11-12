@@ -112,6 +112,15 @@ async function main() {
                                     if(group.name!=='Cross-browser matrix' || Object.keys(group.statuses).length!==4 || Object.values(group.statuses).filter(status=>status==='cancelled').length!==1) throw Error('Matrix summary lost cancelled results');
                                     await window.specRunner.copyOutput(first.id);
                                     await window.specRunner.closeRun(first.id);
+                                    const repeated=await window.specRunner.rerun(finished[1].id);
+                                    if(repeated.runs.length!==1 || repeated.runs[0].browser!==finished[1].browser) throw Error('Rerun changed its target');
+                                    for(let attempt=0;attempt<300;attempt++) {
+                                        const repeatState=await window.specRunner.state(repeated.runs[0].id);
+                                        if(repeatState.status==='passed') break;
+                                        if(repeatState.status==='failed' || attempt===299) throw Error('Rerun did not pass');
+                                        await new Promise(resolve=>setTimeout(resolve,20));
+                                    }
+                                    await window.specRunner.closeBatch(repeated.batch.id);
                                     await window.specRunner.closeBatch(batch.batch.id);
                                     return { ...state, matrix: finished };
                                 }

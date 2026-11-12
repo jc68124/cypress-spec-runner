@@ -51,6 +51,8 @@ app.whenReady().then(async () => {
         return validated.map(option => commandPreview(option, project.config)).join('\n');
     });
     handle('matrix:start', (options: MatrixOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runs.enqueueMatrix(options); });
+    handle('run:rerun', (id: string) => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerun(id); });
+    handle('batch:rerun', (id: string, mode: 'all' | 'failed') => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerunBatch(id, mode); });
     handle('run:update', (id: string, details: RunDetails) => runs.update(id, details));
     handle('batch:list', () => runs.batches());
     handle('batch:rename', (id: string, name: string) => runs.renameBatch(id, name));
