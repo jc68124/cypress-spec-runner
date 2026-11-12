@@ -1,6 +1,6 @@
 {
     "name": "@jc68124/cypress-spec-runner",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "A configurable desktop companion for selecting, grouping, and running Cypress specs.",
     "license": "MIT",
     "bin": {
