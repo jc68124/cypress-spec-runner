@@ -1,5 +1,16 @@
 # @jc68124/cypress-spec-runner
 
+## 0.5.0
+
+### Minor Changes
+
+- 14307ca: Read spec patterns automatically from standard Cypress JS/TS configuration without executing project code or setup hooks. Keep manual overrides in a collapsed advanced section, preserve existing overrides, and explain configurations that need an explicit override.
+- ea3b841: Add opt-in desktop notifications when an entire run group finishes, with passed/failed totals and a test notification in personal preferences. Suppress repeated, cancellation-only and shutdown alerts; report notification errors without affecting test results. Register the required per-user Windows notification shortcut when enabled.
+- 8e3accc: Make argument-array and environment-object editors format valid JSON automatically on blur and save. Add four-space Tab/Shift+Tab indentation, an accessible Escape-then-Tab exit, formatting shortcuts and inline syntax/shape errors. Invalid values never reach the saved project config.
+- 15eb3e7: Add a compact profile-by-browser matrix overview with direct navigation to run output. Retain cancelled/closed results and distinguish combinations not included in a partial rerun.
+- 2f2bb36: Find text in selected run output with Ctrl/Cmd+F, literal case-insensitive highlights, next/previous navigation and Escape to close. Add Jump to latest to resume output following without changing the saved log.
+- 71d808a: Rerun a completed run, an entire group, or only failed target combinations without rebuilding the selection. Preserve run labels and notes, use current project settings, and retain exact failed combinations even after their rows are closed.
+
 ## 0.4.0
 
 ### Minor Changes
