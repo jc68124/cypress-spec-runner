@@ -50,12 +50,16 @@ async function main() {
         await assert.rejects(fs.access(path.join(root, 'node_modules/vite')));
         const configFile = path.join(root, 'spec-runner.config.json');
         const config = JSON.parse(await fs.readFile(configFile, 'utf8'));
+        config.browsers = ['electron'];
         config.profiles[0].env = { EXAMPLE_SETTING: '${EXAMPLE_LOCAL_VALUE}' };
         await fs.writeFile(configFile, JSON.stringify(config));
         await fs.writeFile(path.join(root, '.env'), 'EXAMPLE_LOCAL_VALUE=fixture-value');
         const harness = path.join(root, 'desktop-check.cjs');
         await fs.writeFile(harness, `
-            const { app, BrowserWindow } = require('electron');
+            const { app, BrowserWindow, shell, dialog } = require('electron');
+            const openedLogs = [];
+            shell.openPath = async file => { openedLogs.push(file); return openedLogs.length === 1 ? 'No default application is configured.' : ''; };
+            dialog.showSaveDialog = async () => { throw Error('The existing log should open without a save dialog'); };
             const original = BrowserWindow.prototype.loadFile;
             BrowserWindow.prototype.loadFile = async function(...args) {
                 const result = await original.apply(this,args);
@@ -64,15 +68,25 @@ async function main() {
                     try {
                         const result = await window.webContents.executeJavaScript(\`(async()=>{
                             const project=await window.specRunner.project();
-                            await window.specRunner.run({specs:project.specs,profile:project.config.defaultProfile,browser:'chrome',headed:false});
+                            const unavailable = await window.specRunner.preview({specs:project.specs,profile:project.config.defaultProfile,browser:'chrome',headed:false}).then(()=>null,error=>error.message);
+                            if(!unavailable) throw Error('A disabled browser was accepted');
+                            const noLog = await window.specRunner.openLog().then(()=>null,error=>error.message);
+                            if(!noLog) throw Error('A missing log was opened');
+                            await window.specRunner.run({specs:project.specs,profile:project.config.defaultProfile,browser:'electron',headed:false});
                             for(let index=0;index<300;index++){
                                 const state=await window.specRunner.state();
-                                if(state.status==='passed') return state;
+                                if(state.status==='passed') {
+                                    const failure = await window.specRunner.openLog().then(()=>null,error=>error.message);
+                                    if(!failure || !failure.includes('No default application is configured.')) throw Error('Log open failure was hidden');
+                                    await window.specRunner.openLog();
+                                    return state;
+                                }
                                 if(state.status==='failed') throw Error(state.output);
                                 await new Promise(resolve=>setTimeout(resolve,20));
                             }
                             throw Error('Run did not complete');
                         })()\`);
+                        if(openedLogs.length!==2 || openedLogs.some(file=>file!==result.logPath)) throw Error('Open log did not use the saved run log');
                         console.log('PACKAGED_RUN:' + JSON.stringify(result)); app.exit(0);
                     } catch(error) { console.error(error); app.exit(1); }
                 }, 30);
@@ -92,7 +106,7 @@ async function main() {
         assert.equal(result.value, 'fixture-value');
         assert.ok(result.args.includes('cypress/e2e/example.cy.ts'));
         assert.equal(await fs.readFile(state.logPath, 'utf8'), state.output);
-        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, and saved the complete log without consumer build tools.');
+        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools.');
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 }
 module.exports = { archiveFilename, installArguments };

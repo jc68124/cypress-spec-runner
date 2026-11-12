@@ -95,3 +95,21 @@ test('first-use settings generate categories using the chosen patterns and ignor
     assert.ok(result.changedFiles.includes('.gitignore'));
     assert.match(await readFile(path.join(root, '.gitignore'), 'utf8'), /\.env.preview/);
 });
+
+test('older projects keep all browsers, and restricted browser choices persist and reject disabled runs', async t => {
+    const root = await fixture(t);
+    const legacy = await defaults(root);
+    delete legacy.browsers;
+    await writeFile(path.join(root, configPath), JSON.stringify(legacy));
+    assert.deepEqual((await loadProject(root)).config.browsers, ['chrome', 'electron', 'edge', 'firefox']);
+    const current = await loadProject(root);
+    const saved = await saveConfig(root, { ...current.config, browsers: ['electron', 'firefox'] }, current.configRevision);
+    assert.deepEqual(saved.project.config.browsers, ['electron', 'firefox']);
+    assert.deepEqual(JSON.parse(await readFile(path.join(root, configPath), 'utf8')).browsers, ['electron', 'firefox']);
+    const options = { specs: current.specs, profile: 'default', browser: 'chrome', headed: false };
+    await assert.rejects(validateRun(root, options), /Invalid profile, browser/);
+    assert.equal((await validateRun(root, { ...options, browser: 'electron' })).browser, 'electron');
+    for (const browsers of [[], ['chrome', 'chrome'], ['unknown'], ['chrome; echo unsafe'], null, 'chrome']) {
+        assert.throws(() => validateConfig({ ...current.config, browsers }), /at least one supported browser/);
+    }
+});

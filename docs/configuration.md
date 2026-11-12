@@ -16,6 +16,7 @@ All example addresses and variables below are placeholders. This configuration c
     "specPattern": ["cypress/e2e/**/*.cy.{js,jsx,ts,tsx}"],
     "excludeSpecPattern": ["**/node_modules/**", "**/__snapshots__/**"],
     "envFile": ".env",
+    "browsers": ["chrome", "electron"],
     "profiles": [
         {
             "id": "local",
@@ -47,6 +48,12 @@ Environment settings are loaded when a run starts, so later edits apply to subse
 
 Only variable references and non-sensitive values belong in shared configuration. If you change the local environment-file location, make sure that file is ignored by Git. Local environment files must resolve inside the project.
 
+## Available browsers
+
+Choose the project's browser list in **Settings → Available browsers**, then save and commit `spec-runner.config.json`. The optional `browsers` field accepts `chrome`, `electron`, `edge`, and `firefox`; keep at least one and do not repeat entries. Existing configurations without this field continue to allow all four.
+
+Run controls and the personal preferred-browser setting show only the saved project choices. If a previously selected browser is removed, the runner selects the first enabled browser. Cypress uses the selected browser's local installation; configure the list to match what your team supports.
+
 ## Custom launch options
 
 Profiles have an optional JSON list of `args`, available under **Advanced arguments and environment variables**. Each item is a separate Cypress argument, for example `["--config", "video=false"]`. Arguments are passed directly without a shell. Choose flags supported by the project's installed Cypress version. The runner controls `--spec` and `--project`; profiles cannot override them. The app always runs end-to-end specs in this first release.
@@ -61,4 +68,4 @@ Categories can overlap. Unticking a category removes its files from the next sel
 
 ## Logs
 
-Each run gets a unique timestamp/profile log under `spec-runner-logs/`. Logs are streamed with disk backpressure and are flushed before the run finishes or Stop returns. Files are retained until manually deleted. They remain separate from the 500,000-character live output buffer. A write failure is reported without changing Cypress's exit result; if a log cannot be created, the run does not start.
+Each run gets a unique timestamp/profile log under `spec-runner-logs/`. Logs are streamed with disk backpressure and are flushed before the run finishes or Stop returns. Files are retained until manually deleted. After a run finishes or stops, **Open log** opens its existing file in your default application. The action is available after queued writes have finished; it does not ask you to save another copy. If the system cannot open the file, the app reports the error. Logs remain separate from the 500,000-character live output buffer. A write failure is reported without changing Cypress's exit result; if a log cannot be created, the run does not start.

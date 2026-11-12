@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('specRunner', {
     initialize: async config => { project = { ...project, config: config ?? project.config, initialized: true, configRevision: String(++revision), revision: String(revision), categories: [{ id: 'account', name: 'Account', specs: specs.slice(0,2) }, { id: 'catalog', name: 'Catalog', specs: specs.slice(2) }] }; return { project, changedFiles: ['spec-runner.config.json', '.spec-runner/categories.json', 'package.json', '.gitignore'] }; },
     saveConfig: async config => { project = { ...project, config, configRevision: String(++revision) }; return { project, changedFiles: ['spec-runner.config.json'] }; },
     saveCategories: async categories => { project = { ...project, categories, revision: String(++revision) }; return { project, changedFiles: ['.spec-runner/categories.json'] }; },
-    preview: async () => 'cypress run --e2e --spec example', copy: async () => {}, saveLog: async () => true,
+    preview: async () => 'cypress run --e2e --spec example', copy: async () => {}, openLog: async () => { project.logOpened = true; },
     run: async () => { const state = { ...idle, status: 'running', output: 'Example output\n', logPath: '/example-project/spec-runner-logs/example.log' }; callback(state); return state; },
     stop: async () => callback({ ...idle, status: 'stopped', output: 'Example output\n', logPath: '/example-project/spec-runner-logs/example.log' })
 });
