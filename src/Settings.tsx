@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { NotificationStatus, Project, ProjectConfig, RunProfile, RunOptions } from '../shared/types';
 import { availableBrowsers, browsers } from '../shared/types';
 import { Button, Help } from './ui';
+import { JsonEditor } from './JsonEditor';
+import { parseEditorJson, type JsonKind } from '../shared/json-editor';
 
 export function Settings({ project, disabled, onSave, browser, setBrowser, follow, setFollow, notify, setNotify, notificationState, testNotification }: {
     notify: boolean; setNotify: (value: boolean) => void; notificationState: NotificationStatus; testNotification: () => Promise<void>;
@@ -29,10 +31,21 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
     async function save() {
         setError(''); setSaving(true);
         try {
+            const formatted: typeof advanced = {};
             const profiles = draft.profiles.map(profile => {
-                try { return { ...profile, args: JSON.parse(advanced[profile.id].args), env: JSON.parse(advanced[profile.id].env) }; }
-                catch { throw Error(`Check the advanced argument/environment JSON for ${profile.name}.`); }
+                function parse(kind: JsonKind) {
+                    try { return parseEditorJson(advanced[profile.id][kind], kind); }
+                    catch (error) {
+                        const field = document.getElementById(`${kind}-${profile.id}`), section = field?.closest('details');
+                        if (section) section.open = true; field?.focus();
+                        throw Error(`${profile.name}: ${(error as Error).message}`);
+                    }
+                }
+                const args = parse('args'), env = parse('env');
+                formatted[profile.id] = { args: args.formatted, env: env.formatted };
+                return { ...profile, args: args.value as string[], env: env.value as Record<string, string> };
             });
+            setAdvanced(formatted);
             const { specPattern: _include, excludeSpecPattern: _exclude, ...base } = draft;
             await onSave({ ...base, ...(overrideDiscovery ? { specPattern: lines(patterns), excludeSpecPattern: lines(exclusions) } : {}), profiles });
         } catch (error) { setError((error as Error).message); } finally { setSaving(false); }
@@ -70,8 +83,8 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
                 <div><label htmlFor={`profile-group-${profile.id}`} className="field-label">Shared environment group</label><select id={`profile-group-${profile.id}`} disabled={busy} value={profile.concurrencyGroup ?? ''} onChange={event => updateProfile(profile.id, { concurrencyGroup: event.target.value || undefined })}><option value="">No shared group</option>{draft.concurrencyGroups?.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div></div>
                 <div><label htmlFor={`url-${profile.id}`} className="field-label">Base URL <span className="font-normal text-zinc-500">(optional)</span></label><input id={`url-${profile.id}`} disabled={busy} value={profile.baseUrl ?? ''} placeholder="https://app.example.test or ${BASE_URL}" onChange={event => updateProfile(profile.id, { baseUrl: event.target.value })} /><p className="field-description mt-2">Leave blank to use the URL from the Cypress configuration. References such as {'${BASE_URL}'} use local environment values.</p></div>
                 <details className="rounded-lg bg-zinc-950/60 p-3"><summary className="cursor-pointer text-sm text-zinc-300">Advanced arguments and environment variables</summary><div className="mt-4 grid gap-4 lg:grid-cols-2">
-                    <div><label htmlFor={`args-${profile.id}`} className="field-label">Extra Cypress arguments <Help label={`Argument help for ${profile.name}`}>Enter a JSON list of separate arguments. These are passed directly to Cypress without a shell. The runner controls the selected files and project.</Help></label><textarea id={`args-${profile.id}`} rows={5} disabled={busy} spellCheck={false} value={advanced[profile.id].args} onChange={event => setAdvanced(current => ({ ...current, [profile.id]: { ...current[profile.id], args: event.target.value } }))} /></div>
-                    <div><label htmlFor={`env-${profile.id}`} className="field-label">Environment variables</label><textarea id={`env-${profile.id}`} rows={5} disabled={busy} spellCheck={false} value={advanced[profile.id].env} onChange={event => setAdvanced(current => ({ ...current, [profile.id]: { ...current[profile.id], env: event.target.value } }))} /><p className="field-description mt-2">JSON name/value pairs are shared configuration. Use references such as {'"API_TOKEN": "${LOCAL_API_TOKEN}"'} for secrets.</p></div>
+                    <div><label htmlFor={`args-${profile.id}`} className="field-label">Extra Cypress arguments <Help label={`Argument help for ${profile.name}`}>Enter a JSON list of separate arguments. These are passed directly to Cypress without a shell. The runner controls the selected files and project.</Help></label><JsonEditor id={`args-${profile.id}`} name={`arguments for ${profile.name}`} kind="args" disabled={busy} value={advanced[profile.id].args} onChange={args => { setError(''); setAdvanced(current => ({ ...current, [profile.id]: { ...current[profile.id], args } })); }} /></div>
+                    <div><label htmlFor={`env-${profile.id}`} className="field-label">Environment variables</label><JsonEditor id={`env-${profile.id}`} name={`environment variables for ${profile.name}`} kind="env" disabled={busy} value={advanced[profile.id].env} onChange={env => { setError(''); setAdvanced(current => ({ ...current, [profile.id]: { ...current[profile.id], env } })); }} /><p className="field-description mt-2">JSON name/value pairs are shared configuration. Use references such as {'"API_TOKEN": "${LOCAL_API_TOKEN}"'} for secrets.</p></div>
                 </div></details>
             </div>)}
             <div><label htmlFor="default-profile" className="field-label">Default profile for new users</label><select id="default-profile" disabled={busy} value={draft.defaultProfile} onChange={event => setDraft({ ...draft, defaultProfile: event.target.value })}>{draft.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></div>
@@ -79,7 +92,7 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
         <section className="settings-section space-y-4"><h3 className="font-semibold text-white">Spec discovery <Help label="About automatic spec discovery">Reads literal patterns, local constants and object spreads from the exported Cypress config. Imports and setup hooks do not execute. If environment values, imported helpers or hooks change discovery, use the advanced override.</Help></h3><p className="field-description">{project.discovery?.source === 'override' ? 'Using saved discovery overrides. Turn off the advanced override and save to use your Cypress config.' : `Read from ${project.discovery?.configFile ?? 'Cypress defaults'}. Edit patterns in your Cypress config, then Refresh specs.`}</p>
             {project.discovery?.warning && <p role="status" className="text-sm text-amber-200">{project.discovery.warning}</p>}
             {!overrideDiscovery && <div className="space-y-2 text-xs text-zinc-400"><p>Include: <code className="break-all">{project.discovery?.specPattern.join(', ') || 'No patterns resolved'}</code></p><p>Exclude: <code className="break-all">{project.discovery?.excludeSpecPattern.join(', ') || 'None'}</code></p></div>}
-            <details><summary className="cursor-pointer text-sm text-zinc-300">Advanced discovery override</summary><label className="mt-4 flex items-center gap-3 text-sm"><input type="checkbox" checked={overrideDiscovery} disabled={busy} onChange={event => setOverrideDiscovery(event.target.checked)} />Override Cypress discovery</label>{overrideDiscovery && <div className="mt-4 grid gap-4 lg:grid-cols-2"><div><label htmlFor="spec-patterns" className="field-label">Include patterns</label><textarea id="spec-patterns" rows={4} disabled={busy} value={patterns} onChange={event => setPatterns(event.target.value)} /></div><div><label htmlFor="exclude-patterns" className="field-label">Exclude patterns</label><textarea id="exclude-patterns" rows={4} disabled={busy} value={exclusions} onChange={event => setExclusions(event.target.value)} /></div></div>}</details>
+            <details><summary className="cursor-pointer text-sm text-zinc-300">Advanced discovery override</summary><label className="mt-4 flex items-center gap-3 text-sm"><input type="checkbox" checked={overrideDiscovery} disabled={busy} onChange={event => setOverrideDiscovery(event.target.checked)} />Override Cypress discovery</label>{overrideDiscovery && <div className="mt-4 grid gap-4 lg:grid-cols-2"><div><label htmlFor="spec-patterns" className="field-label">Include patterns</label><textarea id="spec-patterns" rows={4} disabled={busy} value={patterns} onBlur={() => setPatterns(lines(patterns).join('\n'))} onChange={event => setPatterns(event.target.value)} /></div><div><label htmlFor="exclude-patterns" className="field-label">Exclude patterns</label><textarea id="exclude-patterns" rows={4} disabled={busy} value={exclusions} onBlur={() => setExclusions(lines(exclusions).join('\n'))} onChange={event => setExclusions(event.target.value)} /></div></div>}</details>
         </section>
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-4"><p className="max-w-xl text-xs leading-5 text-zinc-400">Save writes shared project files. Commit the files listed in the save reminder to share your changes.</p><Button kind="primary" disabled={busy} onClick={() => void save()}>{saving ? 'Saving…' : project.initialized ? 'Save project settings' : 'Save and finish setup'}</Button></div>
