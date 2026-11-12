@@ -15,8 +15,6 @@ All example addresses and variables below are placeholders. This configuration c
     "version": 1,
     "name": "Example project",
     "configFile": "cypress.config.ts",
-    "specPattern": ["cypress/e2e/**/*.cy.{js,jsx,ts,tsx}"],
-    "excludeSpecPattern": ["**/node_modules/**", "**/__snapshots__/**"],
     "envFile": ".env",
     "browsers": ["chrome", "electron"],
     "profiles": [
@@ -120,3 +118,11 @@ Each run gets a unique timestamp/profile log inside its own `spec-runner-logs/<r
 ## Editing while runs are active
 
 While runs are active or queued, shared project settings, category editing, and spec refresh are locked. A notice in Settings and Categories explains the lock and links to Runs. Finish or stop active runs and cancel queued runs to unlock editing. Spec selection and personal preferences remain available throughout.
+
+## Completion notifications
+
+Enable **Settings → Personal preferences → Notify when a run group finishes** for one desktop summary after the whole group finishes, including passed/failed and any stopped/cancelled totals. It defaults off, is saved locally, and remains editable while runs are active. Use **Send test notification** to verify desktop delivery. Clicking a notice brings the app forward and opens an available failed result first.
+
+Renaming a finished group does not send another notice, enabling notifications does not replay old results, and all-cancelled/stopped groups or app shutdown do not send completion alerts. Notification failures are reported separately and never change Cypress results. Delivery depends on operating-system notification settings.
+
+On Windows, enabling notifications registers a per-user Start menu entry with the application's notification identity and icon. No administrator rights are required. The entry opens the project most recently used with notifications enabled; disabling notifications leaves this launcher in place.

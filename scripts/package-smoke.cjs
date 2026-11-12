@@ -71,6 +71,10 @@ async function main() {
                 setTimeout(async () => {
                     try {
                         const result = await window.webContents.executeJavaScript(\`(async()=>{
+                            const notificationState=await window.specRunner.notifications(false);
+                            if(notificationState.enabled) throw Error('Notifications were not disabled');
+                            const notificationGuard=await window.specRunner.testNotification().then(()=>null,error=>error.message);
+                            if(!notificationGuard) throw Error('Test notification bypassed the opt-in preference');
                             const project=await window.specRunner.project();
                             const unavailable = await window.specRunner.preview({specs:project.specs,profile:project.config.defaultProfile,browser:'chrome',headed:false}).then(()=>null,error=>error.message);
                             if(!unavailable) throw Error('A disabled browser was accepted');

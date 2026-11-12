@@ -37,6 +37,7 @@ function pump() {
     }
 }
 contextBridge.exposeInMainWorld('specRunner', {
+    notifications: async enabled => ({ enabled: !!enabled, supported: true }), testNotification: async () => { project.testNotificationSent = true; }, onNotificationStatus: () => () => {}, onNotificationClick: () => () => {},
     project: async () => project, refresh: async () => { project = { ...project, specModifiedTimes: { ...project.specModifiedTimes, [specs[2]]: 4000 } }; return project; }, runs: async () => jobs,
     state: async id => { const job = jobs.find(job => job.id === id); if (!job) throw Error('Unknown run'); return job; },
     onRunState: listener => { callback = listener; return () => {}; },

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import type { Project, ProjectConfig, RunProfile, RunOptions } from '../shared/types';
+import type { NotificationStatus, Project, ProjectConfig, RunProfile, RunOptions } from '../shared/types';
 import { availableBrowsers, browsers } from '../shared/types';
 import { Button, Help } from './ui';
 
-export function Settings({ project, disabled, onSave, browser, setBrowser, follow, setFollow }: {
+export function Settings({ project, disabled, onSave, browser, setBrowser, follow, setFollow, notify, setNotify, notificationState, testNotification }: {
+    notify: boolean; setNotify: (value: boolean) => void; notificationState: NotificationStatus; testNotification: () => Promise<void>;
     project: Project; disabled: boolean; onSave: (config: ProjectConfig) => Promise<void>;
     browser: RunOptions['browser']; setBrowser: (browser: RunOptions['browser']) => void; follow: boolean; setFollow: (follow: boolean) => void;
 }) {
@@ -84,6 +85,7 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
         <div className="flex flex-wrap items-center justify-between gap-4"><p className="max-w-xl text-xs leading-5 text-zinc-400">Save writes shared project files. Commit the files listed in the save reminder to share your changes.</p><Button kind="primary" disabled={busy} onClick={() => void save()}>{saving ? 'Saving…' : project.initialized ? 'Save project settings' : 'Save and finish setup'}</Button></div>
         <section className="settings-section space-y-4"><h3 className="font-semibold text-white">Personal preferences <span className="ml-2 text-xs font-normal text-zinc-400">Saved locally</span></h3><p className="field-description">These apply immediately for this checkout and do not need committing.</p>
             <div><label htmlFor="preferred-browser" className="field-label">Preferred browser</label><select id="preferred-browser" value={browser} onChange={event => setBrowser(event.target.value as RunOptions['browser'])}>{availableBrowsers(project.config).map(value => <option key={value} value={value}>{value}</option>)}</select></div>
+            <div className="space-y-2"><label className="flex items-center gap-3 text-sm"><input type="checkbox" aria-label="Notify when a run group finishes" checked={notify} disabled={!notificationState.supported} onChange={event => setNotify(event.target.checked)} />Notify when a run group finishes</label><p className="field-description">One desktop summary per finished group, including failures. This preference stays on this computer.</p>{!notificationState.supported && <p className="field-description">Desktop notifications are unavailable in this session.</p>}{notificationState.error && <p role="status" className="text-xs text-amber-200">{notificationState.error}</p>}<Button small disabled={!notificationState.enabled} onClick={() => void testNotification()}>Send test notification</Button></div>
             <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} />Follow new output automatically</label>
         </section>
     </div>;
