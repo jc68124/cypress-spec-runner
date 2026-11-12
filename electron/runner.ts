@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { ProjectConfig, RunOptions, RunState } from '../shared/types';
 import { commandPreview, loadProject, runArguments, validateRun } from './project';
 import { stopWindowsProcess } from './windows-stop';
-import { RunLog } from './run-log';
+import { PlainText, readLogForClipboard, RunLog } from './run-log';
 import { runEnvironment } from './environment';
 import { outputCharacterLimit, outputUpdateInterval } from '../shared/output';
 
@@ -21,6 +21,14 @@ export class Runner {
 
     get state(): RunState { return { ...this.current }; }
     get active(): boolean { return this.busy; }
+    async copyText(): Promise<string> {
+        if (this.current.logError) {
+            if (this.current.outputTruncated) throw Error('The full log is unavailable and the visible output is truncated.');
+            return new PlainText().write(this.current.output);
+        }
+        await this.log?.flush();
+        return this.current.logPath ? readLogForClipboard(this.current.logPath) : new PlainText().write(this.current.output);
+    }
     private emit(): void { this.publish(this.state); }
     private append(data: string): void {
         // Keep ANSI colours, including sequences split across stdout/stderr chunks.

@@ -96,9 +96,9 @@ test('queued cancellation never spawns a process and completed tabs can close in
     const queued = await manager.enqueue(options);
     assert.throws(() => manager.close(first.id), /Stop or cancel/);
     await manager.stop(queued.id);
-    assert.equal(manager.get(queued.id).status, 'cancelled');
+    assert.throws(() => manager.get(queued.id), /no longer exists/);
+    assert.equal(manager.batches().find(batch => batch.id === queued.batchId)!.statuses[queued.id], 'cancelled');
     await assert.rejects(access(queued.artifactDirectory));
-    manager.close(queued.id);
     assert.throws(() => manager.get(queued.id), /no longer exists/);
     assert.equal(manager.get(first.id).status, 'running');
     await assert.rejects(manager.stop('unknown'), /no longer exists/);
@@ -121,14 +121,15 @@ test('shutdown cancels queued runs, stops every active process, and rejects an i
     await manager.stopAll(); await rejected;
     assert.equal(manager.active, false);
     assert.ok(manager.list().every(run => !pendingRun(run)));
-    assert.equal(manager.list().filter(run => run.status === 'cancelled').length, 1);
+    assert.equal(manager.list().filter(run => run.status === 'cancelled').length, 0);
+    assert.equal(manager.batches().flatMap(batch => Object.values(batch.statuses)).filter(status => status === 'cancelled').length, 1);
 });
 test('retained tabs and queued submissions have a fixed memory bound until a completed tab is closed', async t => {
     const { manager } = await setup(t, config => { config.maxConcurrentRuns = 1; });
     const first = await manager.enqueue(options);
     for (let index = 1; index < maxOpenRuns; index++) await manager.enqueue(options);
     await assert.rejects(manager.enqueue(options), /Close completed run tabs/);
-    await manager.stop(manager.list()[1].id); manager.close(manager.list()[1].id);
+    await manager.stop(manager.list()[1].id);
     await manager.enqueue(options);
     assert.equal(manager.list().length, maxOpenRuns);
     assert.equal(manager.get(first.id).status, 'running');
@@ -155,4 +156,55 @@ test('artifact overrides preserve profile config options, JSON, glob braces and 
     assert.equal(values.video, false); assert.equal(values.viewportWidth, 1440);
     assert.equal(values.specPattern, 'cypress/**/*.{ts,js}'); assert.equal(values.baseUrl, 'https://app.example.test');
     assert.equal(values.downloadsFolder, path.join(root, 'artifacts/downloads'));
+});
+
+test('a two-profile two-browser matrix commits all four runs together and uses existing per-profile caps', async t => {
+    const { root, manager } = await setup(t);
+    const result = await manager.enqueueMatrix({ specs: options.specs, profiles: ['a', 'b'], browsers: ['chrome', 'electron'], headed: false });
+    assert.equal(result.runs.length, 4);
+    assert.deepEqual(result.runs.map(run => [run.profileId, run.browser]), [['a', 'chrome'], ['a', 'electron'], ['b', 'chrome'], ['b', 'electron']]);
+    assert.equal(result.runs.filter(run => run.status === 'running').length, 2);
+    assert.equal(result.runs.filter(run => run.status === 'queued').length, 2);
+    assert.equal(new Set(result.runs.map(run => run.artifactDirectory)).size, 4);
+    const first = result.runs[0], queued = result.runs[1];
+    const edited = manager.update(first.id, { name: 'Checkout verification', notes: 'Check the updated selector.' });
+    manager.renameBatch(result.batch.id, 'Cross-browser checks');
+    assert.equal(edited.name, 'Checkout verification');
+    assert.equal(edited.profileId, 'a'); assert.equal(edited.browser, 'chrome');
+    assert.throws(() => manager.update(first.id, { name: '', notes: '' }), /run name/);
+    assert.throws(() => manager.update(first.id, { name: 'Valid', notes: 'x'.repeat(2001) }), /run name/);
+    assert.throws(() => manager.closeBatch(result.batch.id), /Finish, stop or cancel/);
+    await until(() => !!manager.get(first.id).output);
+    assert.ok(JSON.parse(manager.get(first.id).output).args.includes('chrome'));
+    await manager.stop(queued.id);
+    assert.ok(!manager.list().some(run => run.id === queued.id));
+    assert.equal(manager.batches()[0].statuses[queued.id], 'cancelled');
+    await assert.rejects(access(queued.artifactDirectory));
+    await manager.stopAll();
+    const batch = manager.batches()[0];
+    assert.equal(Object.keys(batch.statuses).length, 4);
+    assert.equal(Object.values(batch.statuses).filter(status => status === 'cancelled').length, 2);
+    assert.equal(batch.name, 'Cross-browser checks');
+    assert.equal((await loadProject(root)).config.profiles[0].name, 'A');
+    manager.close(first.id);
+    assert.equal(Object.keys(manager.batches()[0].statuses).length, 4);
+    manager.closeBatch(batch.id);
+    assert.equal(manager.batches().length, 0); assert.equal(manager.list().length, 0);
+});
+test('an invalid matrix cannot start a valid subset, and duplicate or empty selections are rejected', async t => {
+    const { manager } = await setup(t);
+    const matrix = { specs: options.specs, profiles: ['a', 'missing'], browsers: ['chrome', 'electron'] as const, headed: false };
+    await assert.rejects(manager.enqueueMatrix({ ...matrix, browsers: [...matrix.browsers] }), /Invalid profile/);
+    for (const profiles of [[], ['a', 'a']]) await assert.rejects(manager.enqueueMatrix({ ...matrix, profiles, browsers: ['chrome'] }), /Choose at least one/);
+    await assert.rejects(manager.enqueueMatrix({ ...matrix, profiles: ['a'], browsers: ['chrome', 'firefox', 'edge', 'electron', 'missing'] as any }), /Invalid profile/);
+    assert.equal(manager.list().length, 0); assert.equal(manager.batches().length, 0);
+    assert.equal(manager.active, false);
+});
+test('matrix capacity is reserved atomically for concurrent submissions', async t => {
+    const { manager } = await setup(t, config => { config.maxConcurrentRuns = 1; });
+    for (let index = 0; index < maxOpenRuns - 3; index++) await manager.enqueue(options);
+    const matrix = { specs: options.specs, profiles: ['b'], browsers: ['chrome', 'electron'] as const, headed: false };
+    const results = await Promise.allSettled([manager.enqueueMatrix({ ...matrix, browsers: [...matrix.browsers] }), manager.enqueueMatrix({ ...matrix, browsers: [...matrix.browsers] })]);
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(manager.list().length, maxOpenRuns - 1);
 });

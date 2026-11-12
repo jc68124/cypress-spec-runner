@@ -36,7 +36,7 @@ async function main() {
         await fs.mkdir(path.join(root, 'fake-cypress/bin'), { recursive: true });
         await fs.mkdir(path.join(root, 'cypress/e2e'), { recursive: true });
         await fs.writeFile(path.join(root, 'fake-cypress/package.json'), JSON.stringify({ name: 'cypress', version: '16.0.0', bin: { cypress: 'bin/cypress' } }));
-        await fs.writeFile(path.join(root, 'fake-cypress/bin/cypress'), "console.log(JSON.stringify({args:process.argv.slice(2),value:process.env.EXAMPLE_SETTING}));");
+        await fs.writeFile(path.join(root, 'fake-cypress/bin/cypress'), "console.log(JSON.stringify({args:process.argv.slice(2),value:process.env.EXAMPLE_SETTING}));setTimeout(()=>{},500);");
         await fs.writeFile(path.join(root, 'cypress/e2e/example.cy.ts'), '');
         await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'example-consumer', private: true, devDependencies: { cypress: 'file:./fake-cypress', [ownPackage.name]: 'file:' + archive } }));
         await execute(process.execPath, installArguments(process.env.npm_execpath, process.env.npm_config_user_agent), root);
@@ -57,7 +57,7 @@ async function main() {
         await fs.writeFile(path.join(root, '.env'), 'EXAMPLE_LOCAL_VALUE=fixture-value');
         const harness = path.join(root, 'desktop-check.cjs');
         await fs.writeFile(harness, `
-            const { app, BrowserWindow, shell, dialog, nativeImage } = require('electron');
+            const { app, BrowserWindow, shell, dialog, nativeImage, clipboard } = require('electron');
             const icon = nativeImage.createFromPath(${JSON.stringify(path.join(installed, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'))});
             if (icon.isEmpty() || icon.getSize().width < 16) throw Error('Packaged application icon is missing or invalid');
             const openedLogs = [];
@@ -84,7 +84,35 @@ async function main() {
                                     await window.specRunner.openLog(job.id);
                                     await window.specRunner.closeRun(job.id);
                                     if((await window.specRunner.runs()).length) throw Error('Closing a completed run left its tab behind');
-                                    return state;
+                                    const fresh = await window.specRunner.project();
+                                    const expanded = { ...fresh.config, browsers: ['electron', 'chrome'], maxConcurrentRuns: 1, profiles: [...fresh.config.profiles, { id: 'second', name: 'Second environment', args: [], env: fresh.config.profiles[0].env }] };
+                                    await window.specRunner.saveConfig(expanded, fresh.configRevision);
+                                    const matrix = { specs: fresh.specs, profiles: [fresh.config.defaultProfile, 'second'], browsers: ['electron', 'chrome'], headed: false };
+                                    const invalid = await window.specRunner.runMatrix({ ...matrix, profiles: [fresh.config.defaultProfile, 'missing'] }).then(()=>null,error=>error.message);
+                                    if(!invalid || (await window.specRunner.runs()).length) throw Error('Invalid matrix started a partial batch');
+                                    const batch = await window.specRunner.runMatrix(matrix);
+                                    if(batch.runs.length!==4 || batch.runs.filter(run=>run.status==='running').length!==1) throw Error('Matrix did not create four runs with the configured cap');
+                                    const first = batch.runs[0], cancelled = batch.runs[3];
+                                    const renamed = await window.specRunner.updateRun(first.id, { name: 'Checkout checks', notes: 'Compare browser results' });
+                                    if(renamed.name!=='Checkout checks' || renamed.browser!==first.browser || renamed.profileId!==first.profileId) throw Error('Renaming changed the target');
+                                    await window.specRunner.renameBatch(batch.batch.id, 'Cross-browser matrix');
+                                    await window.specRunner.stop(cancelled.id);
+                                    if((await window.specRunner.runs()).some(run=>run.id===cancelled.id)) throw Error('Cancelled queued run remains visible');
+                                    const states = async()=>Promise.all(batch.runs.filter(run=>run.id!==cancelled.id).map(run=>window.specRunner.state(run.id)));
+                                    let finished;
+                                    for(let attempt=0;attempt<400;attempt++) {
+                                        const current=await states();
+                                        if(current.every(run=>run.status==='passed')) { finished=current; break; }
+                                        if(current.some(run=>run.status==='failed')) throw Error(JSON.stringify(current));
+                                        await new Promise(resolve=>setTimeout(resolve,20));
+                                    }
+                                    if(!finished) throw Error('Matrix did not finish');
+                                    const group=(await window.specRunner.batches()).find(group=>group.id===batch.batch.id);
+                                    if(group.name!=='Cross-browser matrix' || Object.keys(group.statuses).length!==4 || Object.values(group.statuses).filter(status=>status==='cancelled').length!==1) throw Error('Matrix summary lost cancelled results');
+                                    await window.specRunner.copyOutput(first.id);
+                                    await window.specRunner.closeRun(first.id);
+                                    await window.specRunner.closeBatch(batch.batch.id);
+                                    return { ...state, matrix: finished };
                                 }
                                 if(state.status==='failed') throw Error(state.output);
                                 await new Promise(resolve=>setTimeout(resolve,20));
@@ -92,6 +120,7 @@ async function main() {
                             throw Error('Run did not complete');
                         })()\`);
                         if(openedLogs.length!==2 || openedLogs.some(file=>file!==result.logPath)) throw Error('Open log did not use the saved run log');
+                        if((await clipboard.readText()).replace(/\\r\\n/g,'\\n')!==result.matrix[0].output.replace(/\\r\\n/g,'\\n')) throw Error('Copy output did not copy the full selected log');
                         console.log('PACKAGED_RUN:' + JSON.stringify(result)); app.exit(0);
                     } catch(error) { console.error(error); app.exit(1); }
                 }, 30);
@@ -114,7 +143,13 @@ async function main() {
         const artifactConfig = JSON.parse(result.args[result.args.indexOf('--config') + 1]);
         assert.equal(artifactConfig.downloadsFolder, path.join(state.artifactDirectory, 'downloads'));
         assert.equal(await fs.readFile(state.logPath, 'utf8'), state.output);
-        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools.');
+        assert.equal(new Set(state.matrix.map(run => run.artifactDirectory)).size, 3);
+        for (const run of state.matrix) {
+            assert.equal(await fs.readFile(run.logPath, 'utf8'), run.output);
+            const args = JSON.parse(run.output).args;
+            assert.equal(args[args.indexOf('--browser') + 1], run.browser);
+        }
+        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs.');
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 }
 module.exports = { archiveFilename, installArguments };

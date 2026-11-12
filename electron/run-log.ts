@@ -2,6 +2,25 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open } from 'node:fs/promises';
 import type { WriteStream } from 'node:fs';
 import path from 'node:path';
+import { finished } from 'node:stream/promises';
+import { clipboardLogByteLimit } from '../shared/output';
+
+export async function readLogForClipboard(filename: string): Promise<string> {
+    const file = await open(filename, 'r');
+    try {
+        const { size } = await file.stat();
+        if (size > clipboardLogByteLimit) throw Error('The full log exceeds the 20 MiB clipboard limit. Use the saved log file instead.');
+        // Fix the snapshot size so a growing live log cannot create an unbounded read.
+        const data = Buffer.alloc(size);
+        let offset = 0;
+        while (offset < size) {
+            const { bytesRead } = await file.read(data, offset, size - offset, offset);
+            if (!bytesRead) break;
+            offset += bytesRead;
+        }
+        return data.subarray(0, offset).toString('utf8');
+    } finally { await file.close(); }
+}
 
 // Retain parser state across writes, including ANSI sequences split between chunks.
 export class PlainText {
@@ -50,6 +69,11 @@ export class RunLog {
     }
 
     write(data: string): boolean { return this.stream.write(this.text.write(data)); }
+
+    async flush(): Promise<void> {
+        if (this.stream.writableEnded || this.stream.destroyed) { await finished(this.stream, { cleanup: true }); return; }
+        await new Promise<void>((resolve, reject) => { this.stream.write('', error => error ? reject(error) : resolve()); });
+    }
 
     async finish(): Promise<void> {
         if (this.stream.closed) return;

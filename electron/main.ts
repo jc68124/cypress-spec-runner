@@ -5,6 +5,8 @@ import { isAppDocumentUrl } from './app-url';
 import { commandPreview, findProject, initializeProject, loadProject, saveCategories, saveConfig, validateRun } from './project';
 import { RunManager } from './run-manager';
 import type { Category, ProjectConfig, RunOptions } from '../shared/types';
+import { matrixRuns } from '../shared/runs';
+import type { MatrixOptions, RunDetails } from '../shared/types';
 
 const appName = 'Cypress Spec Runner';
 app.setName(appName);
@@ -35,7 +37,7 @@ app.whenReady().then(async () => {
     const project = await findProject([process.env.SPEC_RUNNER_PROJECT, process.cwd()]);
     if (!project) throw Error('No Cypress project found. Start the runner from your project folder.');
     root = project.root;
-    runs = new RunManager(root, job => { if (window && !window.isDestroyed()) window.webContents.send('run:changed', job); });
+    runs = new RunManager(root, job => { if (window && !window.isDestroyed()) window.webContents.send('run:changed', job); }, batch => { if (window && !window.isDestroyed()) window.webContents.send('batch:changed', batch); });
     handle('project:get', () => loadProject(root));
     handle('project:refresh', () => loadProject(root));
     handle('project:initialize', (config?: ProjectConfig) => save(() => initializeProject(root, config)));
@@ -43,9 +45,20 @@ app.whenReady().then(async () => {
     handle('categories:save', (categories: Category[], revision: string) => save(() => saveCategories(root, categories, revision)));
     handle('run:preview', async (options: RunOptions) => commandPreview(await validateRun(root, options), (await loadProject(root)).config));
     handle('run:start', (options: RunOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runs.enqueue(options); });
+    handle('matrix:preview', async (options: MatrixOptions) => {
+        const combinations = matrixRuns(options), project = await loadProject(root);
+        const validated = await Promise.all(combinations.map(option => validateRun(root, option, project.config, project.specs)));
+        return validated.map(option => commandPreview(option, project.config)).join('\n');
+    });
+    handle('matrix:start', (options: MatrixOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runs.enqueueMatrix(options); });
+    handle('run:update', (id: string, details: RunDetails) => runs.update(id, details));
+    handle('batch:list', () => runs.batches());
+    handle('batch:rename', (id: string, name: string) => runs.renameBatch(id, name));
+    handle('batch:close', (id: string) => runs.closeBatch(id));
     handle('run:stop', (id: string) => runs.stop(id));
     handle('run:close', (id: string) => runs.close(id));
     handle('run:list', () => runs.list());
+    handle('run:copy-output', async (id: string) => { await clipboard.writeText(await runs.copyText(id)); });
     handle('run:state', (id: string) => runs.get(id));
     handle('run:open-log', async (id: string) => {
         const state = runs.get(id);
@@ -53,9 +66,9 @@ app.whenReady().then(async () => {
         const error = await shell.openPath(state.logPath);
         if (error) throw Error(`Unable to open the log: ${error}`);
     });
-    handle('clipboard:copy', (text: string) => {
+    handle('clipboard:copy', async (text: string) => {
         if (typeof text !== 'string' || text.length > 250_000) throw Error('Invalid clipboard content.');
-        clipboard.writeText(text);
+        await clipboard.writeText(text);
     });
     window = new BrowserWindow({ width: 1440, height: 960, minWidth: 980, minHeight: 700, title: appName,
         backgroundColor: '#09090b', autoHideMenuBar: true, icon,

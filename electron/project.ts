@@ -200,9 +200,9 @@ export async function initializeProject(root: string, chosenConfig?: ProjectConf
     if (missing.length) { await writeFile(path.join(root, '.gitignore'), ignore + (ignore.endsWith('\n') || !ignore ? '' : '\n') + missing.join('\n') + '\n'); changedFiles.push('.gitignore'); }
     return { project: await loadProject(root), changedFiles };
 }
-export async function validateRun(root: string, value: unknown, snapshot?: ProjectConfig): Promise<RunOptions> {
+export async function validateRun(root: string, value: unknown, snapshot?: ProjectConfig, discovered?: string[]): Promise<RunOptions> {
     const options = value as RunOptions;
-    const project = snapshot ? { config: validateConfig(snapshot), specs: await discoverSpecs(root, snapshot) } : await loadProject(root);
+    const project = snapshot ? { config: validateConfig(snapshot), specs: discovered ?? await discoverSpecs(root, snapshot) } : await loadProject(root);
     if (!options || !Array.isArray(options.specs) || !options.specs.length || options.specs.some(spec => !literalSpec(spec))) throw Error('Select at least one valid spec file.');
     if (!project.config.profiles.some(profile => profile.id === options.profile) || !availableBrowsers(project.config).includes(options.browser) || typeof options.headed !== 'boolean') throw Error('Invalid profile, browser, or run options.');
     if (options.specs.some(spec => !project.specs.includes(spec))) throw Error('A selected spec no longer exists or does not match the configured patterns. Refresh your specs.');

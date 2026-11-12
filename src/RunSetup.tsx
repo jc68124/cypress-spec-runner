@@ -1,0 +1,17 @@
+import { useState } from 'react';
+import type { MatrixOptions, ProjectConfig } from '../shared/types';
+import { availableBrowsers } from '../shared/types';
+import { maxOpenRuns } from '../shared/runs';
+import { Button, Checkbox, Help, Modal } from './ui';
+export type RunTargets = Omit<MatrixOptions, 'specs'>;
+export function RunSetup({ config, targets, specCount, onApply, onClose }: { config: ProjectConfig; targets: RunTargets; specCount: number; onApply: (targets: RunTargets) => void; onClose: () => void }) {
+    const [draft, setDraft] = useState(targets);
+    const count = draft.profiles.length * draft.browsers.length;
+    return <Modal title="Configure run" description="Every selected browser runs the same specs on every selected profile. Existing concurrency limits control what starts and what queues." onClose={onClose} actions={<><Button onClick={onClose}>Cancel</Button><Button kind="primary" disabled={!count || count > maxOpenRuns} onClick={() => onApply(draft)}>Apply configuration</Button></>}>
+        <div className="grid gap-6 sm:grid-cols-2"><fieldset><legend className="field-label">Run profiles</legend><div id="run-profiles" className="max-h-64 space-y-3 overflow-y-auto">{config.profiles.map(profile => <label key={profile.id} className="flex items-start gap-3 text-sm"><Checkbox label={`Run on profile ${profile.name}`} checked={draft.profiles.includes(profile.id)} onChange={checked => setDraft(current => ({ ...current, profiles: checked ? [...current.profiles, profile.id] : current.profiles.filter(id => id !== profile.id) }))} /><span className="min-w-0"><span className="block break-words text-zinc-100">{profile.name}</span><span className="mt-1 block text-xs text-zinc-400">Up to {profile.maxConcurrentRuns ?? 1} at once{profile.concurrencyGroup ? ` · ${config.concurrencyGroups?.find(group => group.id === profile.concurrencyGroup)?.name}` : ''}</span></span></label>)}</div></fieldset>
+            <fieldset><legend className="field-label">Browsers</legend><div id="run-browsers" className="space-y-3">{availableBrowsers(config).map(browser => <label key={browser} className="flex items-center gap-3 text-sm"><Checkbox label={`Run in ${browser}`} checked={draft.browsers.includes(browser)} onChange={checked => setDraft(current => ({ ...current, browsers: checked ? [...current.browsers, browser] : current.browsers.filter(value => value !== browser) }))} />{browser}</label>)}</div></fieldset></div>
+        <label className="mt-6 flex items-center gap-3 text-sm"><input type="checkbox" checked={draft.headed} onChange={event => setDraft({ ...draft, headed: event.target.checked })} />Show browsers <Help label="About showing the browser">Opens a browser window for each active run. Leave off for headless runs.</Help></label>
+        <div aria-label="Run configuration summary" className="mt-5 rounded-lg border border-indigo-400/30 bg-indigo-500/10 p-3 text-sm text-indigo-100">{specCount} specs × {draft.profiles.length} profiles × {draft.browsers.length} browsers = <strong>{count} runs</strong><p className="mt-1 text-xs text-indigo-200">Up to {config.maxConcurrentRuns ?? 2} runs at once overall, subject to profile and shared environment limits.</p></div>
+        {!count && <p role="status" className="mt-3 text-sm text-amber-200">Choose at least one profile and browser.</p>}{count > maxOpenRuns && <p role="alert" className="mt-3 text-sm text-amber-200">Choose at most {maxOpenRuns} combinations per batch.</p>}
+    </Modal>;
+}

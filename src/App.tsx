@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Category, Project, ProjectConfig, RunOptions, RunJob, SaveResult } from '../shared/types';
+import type { Category, MatrixOptions, Project, ProjectConfig, RunOptions, RunJob, RunBatch, SaveResult } from '../shared/types';
 import { availableBrowsers } from '../shared/types';
-import { mergeRun, pendingRun } from '../shared/runs';
+import { mergeBatch, mergeRun, pendingRun } from '../shared/runs';
 import { RunOutput } from './RunOutput';
 import { selectionState, toggleSpecs } from '../shared/selection';
 import { sortSpecs, specSortOrders, type SpecSort } from '../shared/spec-sort';
@@ -9,9 +9,10 @@ import { Button, Checkbox, Help, Modal } from './ui';
 import { SpecList } from './SpecList';
 import { CategoryEditor } from './CategoryEditor';
 import { Settings } from './Settings';
+import { RunSetup } from './RunSetup';
 type View = 'categories' | 'specs' | 'output' | 'settings';
-type Preferences = { selected: string[]; profile: string; browser: RunOptions['browser']; headed: boolean; follow: boolean; specSort: SpecSort };
-const initialPreferences: Preferences = { selected: [], profile: '', browser: 'chrome', headed: false, follow: true, specSort: 'name-asc' };
+type Preferences = { selected: string[]; profile: string; browser: RunOptions['browser']; headed: boolean; follow: boolean; specSort: SpecSort; profiles: string[]; browsers: RunOptions['browser'][] };
+const initialPreferences: Preferences = { selected: [], profile: '', browser: 'chrome', headed: false, follow: true, specSort: 'name-asc', profiles: [], browsers: [] };
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 function readPreferences(root: string): Preferences {
     try { return { ...initialPreferences, ...JSON.parse(localStorage.getItem(`spec-runner:${root}`) ?? '{}') }; } catch { return initialPreferences; }
@@ -21,6 +22,9 @@ export function App() {
     const [view, setView] = useState<View>('categories');
     const [preferences, setPreferences] = useState(initialPreferences);
     const [runs, setRuns] = useState<RunJob[]>([]);
+    const [batches, setBatches] = useState<RunBatch[]>([]);
+    const removedRuns = useRef(new Set<string>());
+    const removedBatches = useRef(new Set<string>());
     const [selectedRun, setSelectedRun] = useState<string | null>(null);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(true);
@@ -31,6 +35,7 @@ export function App() {
     const [filter, setFilter] = useState('all');
     const [viewing, setViewing] = useState<string | null>(null);
     const [reviewing, setReviewing] = useState(false);
+    const [configuring, setConfiguring] = useState(false);
     const [editing, setEditing] = useState<Category | null>(null);
     const [preview, setPreview] = useState('');
     const [previewError, setPreviewError] = useState('');
@@ -49,7 +54,12 @@ export function App() {
         currentRoot.current = next.root;
         setPreferences(current => {
             const saved = first ? readPreferences(next.root) : current;
+            const profile = next.config.profiles.some(profile => profile.id === saved.profile) ? saved.profile : next.config.defaultProfile;
+            const browser = availableBrowsers(next.config).includes(saved.browser) ? saved.browser : availableBrowsers(next.config)[0];
+            const profiles = Array.isArray(saved.profiles) ? [...new Set(saved.profiles.filter(id => next.config.profiles.some(profile => profile.id === id)))] : [];
+            const chosenBrowsers = Array.isArray(saved.browsers) ? [...new Set(saved.browsers.filter(value => availableBrowsers(next.config).includes(value)))] : [];
             return { selected: Array.isArray(saved.selected) ? saved.selected.filter(spec => next.specs.includes(spec)) : [],
+                profiles: profiles.length ? profiles : [profile], browsers: chosenBrowsers.length ? chosenBrowsers : [browser],
                 profile: next.config.profiles.some(profile => profile.id === saved.profile) ? saved.profile : next.config.defaultProfile,
                 browser: availableBrowsers(next.config).includes(saved.browser) ? saved.browser : availableBrowsers(next.config)[0], headed: !!saved.headed, follow: saved.follow !== false,
                 specSort: specSortOrders.includes(saved.specSort) ? saved.specSort : 'name-asc' };
@@ -57,26 +67,36 @@ export function App() {
         setProject(next);
         if (first && !next.initialized) setView('settings');
     }
+    function acceptRun(job: RunJob) {
+        if (job.removed) removedRuns.current.add(job.id);
+        setRuns(current => removedRuns.current.has(job.id) ? current.filter(run => run.id !== job.id) : mergeRun(current, job));
+    }
+    function acceptBatch(batch: RunBatch) {
+        if (batch.removed) removedBatches.current.add(batch.id);
+        setBatches(current => removedBatches.current.has(batch.id) ? current.filter(item => item.id !== batch.id) : mergeBatch(current, batch));
+    }
     function acceptSave(result: SaveResult) { acceptProject(result.project); setCommitFiles(current => [...new Set([...current, ...result.changedFiles])]); }
     useEffect(() => {
         let alive = true;
         if (!window.specRunner) { setError('Start the app using the spec-runner command in a Cypress project.'); setLoading(false); return; }
-        const unsubscribe = window.specRunner.onRunState(state => { if (alive) setRuns(current => mergeRun(current, state)); });
-        void Promise.all([window.specRunner.project(), window.specRunner.runs()]).then(([next, jobs]) => {
-            if (alive) { acceptProject(next); setRuns(current => jobs.reduce(mergeRun, current)); }
+        const unsubscribe = window.specRunner.onRunState(state => { if (alive) acceptRun(state); });
+        const unsubscribeBatches = window.specRunner.onBatchState(state => { if (alive) acceptBatch(state); });
+        void Promise.all([window.specRunner.project(), window.specRunner.runs(), window.specRunner.batches()]).then(([next, jobs, groups]) => {
+            if (alive) { acceptProject(next); jobs.forEach(acceptRun); groups.forEach(acceptBatch); }
         }).catch(error => { if (alive) setError(message(error)); }).finally(() => { if (alive) setLoading(false); });
-        return () => { alive = false; unsubscribe(); };
+        return () => { alive = false; unsubscribe(); unsubscribeBatches(); };
     }, []);
     useEffect(() => { if (project) { try { localStorage.setItem(`spec-runner:${project.root}`, JSON.stringify(preferences)); } catch { /* Optional local preferences. */ } } }, [preferences, project?.root]);
     const selected = preferences.selected;
     const available = useMemo(() => new Set(project?.specs ?? []), [project?.specs]);
     const selectedSpecs = useMemo(() => selected.filter(spec => available.has(spec)), [selected, available]);
-    const options = useMemo<RunOptions>(() => ({ specs: selectedSpecs, profile: preferences.profile, browser: preferences.browser, headed: preferences.headed }), [selectedSpecs, preferences.profile, preferences.browser, preferences.headed]);
+    const options = useMemo<MatrixOptions>(() => ({ specs: selectedSpecs, profiles: preferences.profiles, browsers: preferences.browsers, headed: preferences.headed }), [selectedSpecs, preferences.profiles, preferences.browsers, preferences.headed]);
+    const plannedRuns = options.profiles.length * options.browsers.length;
     useEffect(() => {
         let alive = true;
         setPreview(''); setPreviewError(''); setCopied(false);
-        if (!project || !selectedSpecs.length) return;
-        const timer = setTimeout(() => { void window.specRunner.preview(options).then(value => { if (alive) setPreview(value); }).catch(error => { if (alive) setPreviewError(message(error)); }); }, 120);
+        if (!project || !selectedSpecs.length || !plannedRuns) return;
+        const timer = setTimeout(() => { void window.specRunner.previewMatrix(options).then(value => { if (alive) setPreview(value); }).catch(error => { if (alive) setPreviewError(message(error)); }); }, 120);
         return () => { alive = false; clearTimeout(timer); };
     }, [options, project?.configRevision, project?.specs]);
     function toggle(paths: string[], checked: boolean) { setPreferences(current => ({ ...current, selected: toggleSpecs(current.selected, paths, checked) })); }
@@ -101,7 +121,6 @@ export function App() {
     const viewedCategory = project?.categories.find(category => category.id === viewing);
     const viewedSpecs = viewedCategory?.specs.filter(spec => available.has(spec)) ?? [];
     const viewedCount = viewedSpecs.filter(spec => selected.includes(spec)).length;
-    const profileName = project?.config.profiles.find(profile => profile.id === preferences.profile)?.name;
     return <main className="flex h-screen flex-col overflow-hidden bg-zinc-950">
         <header className="flex shrink-0 items-center justify-between gap-5 border-b border-white/10 bg-zinc-900 px-7 py-5"><div className="min-w-0"><div className="text-xs font-semibold tracking-widest text-indigo-400 uppercase">Cypress Spec Runner</div><h1 className="mt-1 truncate text-xl font-semibold text-white">{project?.config.name ?? 'Open your Cypress project'}</h1><p className="mt-1 truncate text-xs text-zinc-500" title={project?.root}>{project?.root ?? 'Loading project…'}</p></div><Button title={active ? 'Refresh specs is unavailable while runs are active or queued. Finish or stop active runs and cancel queued runs first.' : undefined} disabled={!project || pending || active} onClick={() => void operation(async () => acceptProject(await window.specRunner.refresh()))}>Refresh specs</Button></header>
         {error && <div role="alert" className="flex shrink-0 justify-between gap-4 border-b border-red-400/20 bg-red-500/10 px-7 py-3 text-sm text-red-300"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
@@ -118,18 +137,22 @@ export function App() {
                         })}</div>{!project.categories.length && <div className="rounded-lg border border-dashed border-white/15 p-8 text-center text-sm text-zinc-400">Create a category to group specs, or select files in Individual specs.</div>}{!!uncategorised.length && <Button small kind="plain" onClick={() => { setFilter('uncategorised'); setSearch(''); setView('specs'); }}>{uncategorised.length} uncategorised specs · Review and select</Button>}
                     </div>}
                     {view === 'specs' && <div className="space-y-5"><h2 className="text-xl font-semibold text-white">Individual specs</h2><p className="text-sm text-zinc-400">Fine-tune the same selection used by your categories.</p><div className="grid grid-cols-2 gap-3 xl:grid-cols-[minmax(0,1fr)_11rem_13rem]"><div className="col-span-2 xl:col-span-1"><label htmlFor="spec-search" className="field-label">Search specs</label><input id="spec-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by file or folder…" /></div><div><label htmlFor="spec-filter" className="field-label">Filter specs</label><select id="spec-filter" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">All specs</option><option value="selected">Selected only</option><option value="uncategorised">Uncategorised</option>{project.categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div><div><label htmlFor="spec-sort" className="field-label">Sort by <Help label="About sorting specs">Alphabetical order uses file names, then paths for matching names. Edit dates come from local files, rather than Git history. Use Refresh specs after editing files. Missing dates appear last. This choice is saved only on this computer.</Help></label><select id="spec-sort" value={preferences.specSort} onChange={event => setPreferences(current => ({ ...current, specSort: event.target.value as SpecSort }))}><option value="name-asc">File name A–Z</option><option value="name-desc">File name Z–A</option><option value="modified-desc">Recently edited first</option><option value="modified-asc">Oldest edited first</option></select></div></div><div className="card overflow-hidden"><div className="flex items-center justify-between border-b border-white/10 p-3"><label className="flex items-center gap-3 text-sm"><Checkbox label="Select shown specs" checked={selectionState(selectedSpecs, visibleSpecs) === 'all'} partial={selectionState(selectedSpecs, visibleSpecs) === 'some'} disabled={!visibleSpecs.length} onChange={checked => toggle(visibleSpecs, checked)} />Select shown</label><span className="text-xs text-zinc-400">{visibleSpecs.length} shown</span></div><SpecList specs={visibleSpecs} selected={selectedSpecs} onToggle={toggle} modifiedTimes={preferences.specSort.startsWith('modified-') ? project.specModifiedTimes : undefined} /></div></div>}
-                    {view === 'settings' && <Settings key={project.configRevision} project={project} disabled={active || pending} onSave={saveSettings} browser={preferences.browser} setBrowser={browser => setPreferences(current => ({ ...current, browser }))} follow={preferences.follow} setFollow={follow => setPreferences(current => ({ ...current, follow }))} />}
-                    {view === 'output' && <RunOutput runs={runs} selectedId={selectedRun} select={setSelectedRun} follow={preferences.follow} setFollow={follow => setPreferences(current => ({ ...current, follow }))} pending={pending} prepare={() => setView('categories')} operation={operation} close={async id => { await window.specRunner.closeRun(id); setRuns(current => current.filter(run => run.id !== id)); setSelectedRun(current => current === id ? null : current); }} /> }
+                    {view === 'settings' && <Settings key={project.configRevision} project={project} disabled={active || pending} onSave={saveSettings} browser={preferences.browser} setBrowser={browser => setPreferences(current => ({ ...current, browser, browsers: [browser] }))} follow={preferences.follow} setFollow={follow => setPreferences(current => ({ ...current, follow }))} />}
+                    {view === 'output' && <RunOutput runs={runs} batches={batches} selectedId={selectedRun} select={setSelectedRun} follow={preferences.follow} setFollow={follow => setPreferences(current => ({ ...current, follow }))} pending={pending} prepare={() => setView('categories')} operation={operation} close={async id => { await window.specRunner.closeRun(id); removedRuns.current.add(id); setRuns(current => current.filter(run => run.id !== id)); }} /> }
                 </div>
             </section>
             <aside aria-label="Run controls" className="space-y-5 overflow-y-auto border-l border-white/10 bg-zinc-900/50 p-6"><div><div className="flex items-start justify-between"><div><h2 className="text-sm font-semibold text-white">Next run</h2><p className="mt-2 text-3xl font-semibold text-white">{selectedSpecs.length}<span className="ml-2 text-xs font-normal text-zinc-400">of {project.specs.length} specs</span></p></div><Button small kind="plain" disabled={!selectedSpecs.length} onClick={() => toggle(selectedSpecs, false)}>Clear</Button></div><Button small className="mt-3" disabled={!selectedSpecs.length} onClick={() => setReviewing(true)}>Review selected</Button></div><p className="text-xs leading-5 text-zinc-400">Shared specs count once. Each selected file runs all its tests.</p>
-                <div className="space-y-4 border-t border-white/10 pt-5"><div><label htmlFor="run-profile" className="field-label">Run profile <Help label="About the selected profile">Profiles supply project-specific URLs, arguments, and variables. Configure shared profiles on the Settings page.</Help></label><select id="run-profile" disabled={pending} value={preferences.profile} onChange={event => setPreferences(current => ({ ...current, profile: event.target.value }))}>{project.config.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></div><div><label htmlFor="browser" className="field-label">Browser</label><select id="browser" disabled={pending} value={preferences.browser} onChange={event => setPreferences(current => ({ ...current, browser: event.target.value as RunOptions['browser'] }))}>{availableBrowsers(project.config).map(browser => <option key={browser} value={browser}>{browser}</option>)}</select></div><label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={preferences.headed} disabled={pending} onChange={event => setPreferences(current => ({ ...current, headed: event.target.checked }))} />Show browser <Help label="About showing the browser">Runs Cypress with a visible browser window. Leave off for a headless run.</Help></label></div>
-                <div className="space-y-3"><Button kind="primary" className="w-full whitespace-normal" disabled={!preview || pending || !project.initialized} onClick={() => void operation(async () => { const job = await window.specRunner.run(options); setRuns(current => mergeRun(current, job)); setSelectedRun(job.id); setView('output'); })}>Run {selectedSpecs.length} {selectedSpecs.length === 1 ? 'spec' : 'specs'} · {profileName}</Button><Button className="w-full" disabled={!preview || pending} onClick={() => void operation(async () => { await window.specRunner.copy(preview); setCopied(true); })}>{copied ? 'Copied command' : 'Copy command'}</Button><p className="text-xs leading-5 text-zinc-500">Creates a new run tab. Busy profiles queue automatically.</p>{previewError && <p role="alert" className="text-xs text-red-300">{previewError}</p>}</div>
+                <div className="space-y-3 border-t border-white/10 pt-5"><h3 className="text-sm font-semibold text-white">Run targets</h3><p className="line-clamp-2 break-words text-xs leading-5 text-zinc-300" title={project.config.profiles.filter(profile => preferences.profiles.includes(profile.id)).map(profile => profile.name).join(', ')}>{project.config.profiles.filter(profile => preferences.profiles.includes(profile.id)).map(profile => profile.name).join(', ') || 'No profiles selected'}</p><p className="text-xs text-zinc-400">{preferences.browsers.join(', ') || 'No browsers selected'} · {preferences.headed ? 'headed' : 'headless'}</p><Button small disabled={pending} onClick={() => setConfiguring(true)}>Configure run</Button></div>
+                <div className="space-y-3"><p role="status" aria-label="Planned runs" className="rounded-lg border border-white/10 bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">{selectedSpecs.length} specs × {preferences.profiles.length} {preferences.profiles.length === 1 ? 'profile' : 'profiles'} × {preferences.browsers.length} {preferences.browsers.length === 1 ? 'browser' : 'browsers'} = <strong className="text-white">{plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</strong></p>
+                    <Button kind="primary" className="w-full whitespace-normal" disabled={!preview || pending || !project.initialized} onClick={() => void operation(async () => { const result = await window.specRunner.runMatrix(options); result.runs.forEach(acceptRun); acceptBatch(result.batch); setSelectedRun(result.runs[0]?.id ?? null); setView('output'); })}>Start {plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</Button>
+                    <Button className="w-full" disabled={!preview || pending} onClick={() => void operation(async () => { await window.specRunner.copy(preview); setCopied(true); })}>{copied ? 'Copied commands' : plannedRuns === 1 ? 'Copy command' : 'Copy commands'}</Button><p className="text-xs leading-5 text-zinc-500">Each combination gets its own output and log. Busy profiles queue automatically.</p>{!plannedRuns && <p className="text-xs text-amber-200">Choose at least one profile and browser.</p>}{previewError && <p role="alert" className="text-xs text-red-300">{previewError}</p>}
+                </div>
                 <details className="rounded-lg border border-white/10 bg-zinc-950 p-3"><summary className="cursor-pointer text-xs text-zinc-400">Command preview</summary><code className="mt-3 block max-h-48 overflow-y-auto text-xs leading-6 break-all text-zinc-300">{preview || 'Select specs to build a command.'}</code><p className="mt-2 text-xs leading-5 text-zinc-500">Local environment references are resolved by this app when a run starts.</p></details><div role="status" className="border-t border-white/10 pt-4 text-sm text-zinc-300">{runningCount} running · {queuedCount} queued</div>
             </aside>
         </div>}
         {viewedCategory && <Modal title={viewedCategory.name} description="Tick specs for your next run. Edit category changes shared assignments." onClose={() => setViewing(null)} actions={<><Button title={lockReason} disabled={active} onClick={() => { setEditing(viewedCategory); setViewing(null); }}>Edit category</Button><Button kind="primary" onClick={() => setViewing(null)}>Done</Button></>}>{lockNotice}<div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-zinc-400">{viewedCount} of {viewedSpecs.length} selected</p><div className="flex gap-2"><Button small disabled={viewedCount === viewedSpecs.length} onClick={() => toggle(viewedSpecs, true)}>Select all</Button><Button small kind="plain" disabled={!viewedCount} onClick={() => toggle(viewedSpecs, false)}>Deselect all</Button></div></div><div className="max-h-96 overflow-y-auto rounded-lg border border-white/10"><SpecList specs={viewedSpecs} selected={selectedSpecs} onToggle={toggle} /></div></Modal>}
         {reviewing && <Modal title="Review selected specs" description="These files are included in your next run. Untick a file to remove it." onClose={() => setReviewing(false)} actions={<Button kind="primary" onClick={() => setReviewing(false)}>Done</Button>}><p className="mb-3 text-sm text-zinc-400">{selectedSpecs.length} specs selected</p>{selectedSpecs.length ? <div className="max-h-96 overflow-y-auto"><SpecList specs={selectedSpecs} selected={selectedSpecs} onToggle={toggle} /></div> : <p className="text-sm text-zinc-400">No specs selected. Choose categories or individual specs to build your run.</p>}</Modal>}
+        {configuring && project && <RunSetup config={project.config} targets={{ profiles: preferences.profiles, browsers: preferences.browsers, headed: preferences.headed }} specCount={selectedSpecs.length} onClose={() => setConfiguring(false)} onApply={targets => { setPreferences(current => ({ ...current, ...targets })); setConfiguring(false); }} />}
         {editing && project && <CategoryEditor key={editing.id} category={editing} specs={project.specs} existing={project.categories.some(category => category.id === editing.id)} onClose={() => setEditing(null)} onSave={saveCategory} />}
     </main>;
 }
