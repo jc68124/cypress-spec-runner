@@ -3,7 +3,7 @@
     "title": "Cypress Spec Runner project configuration",
     "type": "object",
     "additionalProperties": false,
-    "required": ["version", "name", "configFile", "specPattern", "excludeSpecPattern", "envFile", "profiles", "defaultProfile"],
+    "required": ["version", "name", "configFile", "envFile", "profiles", "defaultProfile"],
     "properties": {
         "$schema": { "type": "string" },
         "version": { "const": 1 },

@@ -15,8 +15,8 @@ export interface ProjectConfig {
     version: 1;
     name: string;
     configFile: string | null;
-    specPattern: string[];
-    excludeSpecPattern: string[];
+    specPattern?: string[];
+    excludeSpecPattern?: string[];
     envFile: string | null;
     browsers?: Browser[];
     maxConcurrentRuns?: number;
@@ -27,12 +27,14 @@ export interface ProjectConfig {
 export function availableBrowsers(config: ProjectConfig): readonly Browser[] { return config.browsers ?? browsers; }
 export interface Category { id: string; name: string; specs: string[] }
 export interface CategoryFile { version: 1; categories: Category[] }
+export interface SpecDiscovery { source: 'cypress' | 'defaults' | 'override'; configFile: string | null; specPattern: string[]; excludeSpecPattern: string[]; warning?: string }
 export interface Project {
     root: string;
     config: ProjectConfig;
     configRevision: string;
     specs: string[];
     specModifiedTimes: Record<string, number>;
+    discovery?: SpecDiscovery;
     categories: Category[];
     revision: string;
     initialized: boolean;

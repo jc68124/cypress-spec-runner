@@ -38,6 +38,7 @@ async function main() {
         await fs.writeFile(path.join(root, 'fake-cypress/package.json'), JSON.stringify({ name: 'cypress', version: '16.0.0', bin: { cypress: 'bin/cypress' } }));
         await fs.writeFile(path.join(root, 'fake-cypress/bin/cypress'), "console.log(JSON.stringify({args:process.argv.slice(2),value:process.env.EXAMPLE_SETTING}));setTimeout(()=>{},500);");
         await fs.writeFile(path.join(root, 'cypress/e2e/example.cy.ts'), '');
+        await fs.writeFile(path.join(root, 'cypress.config.ts'), "import {defineConfig} from 'cypress'; throw Error('Discovery must not execute config'); export default defineConfig({e2e:{specPattern:'cypress/e2e/**/*.cy.ts'}});");
         await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'example-consumer', private: true, devDependencies: { cypress: 'file:./fake-cypress', [ownPackage.name]: 'file:' + archive } }));
         await execute(process.execPath, installArguments(process.env.npm_execpath, process.env.npm_config_user_agent), root);
         const installed = await fs.realpath(path.join(root, 'node_modules', ownPackage.name));

@@ -8,8 +8,9 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
     browser: RunOptions['browser']; setBrowser: (browser: RunOptions['browser']) => void; follow: boolean; setFollow: (follow: boolean) => void;
 }) {
     const [draft, setDraft] = useState(project.config);
-    const [patterns, setPatterns] = useState(project.config.specPattern.join('\n'));
-    const [exclusions, setExclusions] = useState(project.config.excludeSpecPattern.join('\n'));
+    const [overrideDiscovery, setOverrideDiscovery] = useState(project.config.specPattern !== undefined || project.config.excludeSpecPattern !== undefined);
+    const [patterns, setPatterns] = useState((project.config.specPattern ?? project.discovery?.specPattern ?? ['cypress/e2e/**/*.cy.{js,jsx,ts,tsx}']).join('\n'));
+    const [exclusions, setExclusions] = useState((project.config.excludeSpecPattern ?? project.discovery?.excludeSpecPattern ?? ['*.hot-update.js']).join('\n'));
     const [advanced, setAdvanced] = useState<Record<string, { args: string; env: string }>>(() => Object.fromEntries(project.config.profiles.map(profile => [profile.id, { args: JSON.stringify(profile.args, null, 2), env: JSON.stringify(profile.env, null, 2) }])));
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -31,7 +32,8 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
                 try { return { ...profile, args: JSON.parse(advanced[profile.id].args), env: JSON.parse(advanced[profile.id].env) }; }
                 catch { throw Error(`Check the advanced argument/environment JSON for ${profile.name}.`); }
             });
-            await onSave({ ...draft, specPattern: lines(patterns), excludeSpecPattern: lines(exclusions), profiles });
+            const { specPattern: _include, excludeSpecPattern: _exclude, ...base } = draft;
+            await onSave({ ...base, ...(overrideDiscovery ? { specPattern: lines(patterns), excludeSpecPattern: lines(exclusions) } : {}), profiles });
         } catch (error) { setError((error as Error).message); } finally { setSaving(false); }
     }
     return <div className="mx-auto max-w-5xl space-y-5">
@@ -73,8 +75,10 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
             </div>)}
             <div><label htmlFor="default-profile" className="field-label">Default profile for new users</label><select id="default-profile" disabled={busy} value={draft.defaultProfile} onChange={event => setDraft({ ...draft, defaultProfile: event.target.value })}>{draft.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></div>
         </section>
-        <section className="settings-section space-y-4"><h3 className="font-semibold text-white">Spec discovery</h3><p className="field-description">The standard Cypress folder works by default. For a custom layout, enter patterns that match your Cypress configuration. One pattern per line; paths are relative to this project.</p>
-            <div className="grid gap-4 lg:grid-cols-2"><div><label htmlFor="spec-patterns" className="field-label">Include patterns</label><textarea id="spec-patterns" rows={4} disabled={busy} value={patterns} onChange={event => setPatterns(event.target.value)} /></div><div><label htmlFor="exclude-patterns" className="field-label">Exclude patterns</label><textarea id="exclude-patterns" rows={4} disabled={busy} value={exclusions} onChange={event => setExclusions(event.target.value)} /></div></div>
+        <section className="settings-section space-y-4"><h3 className="font-semibold text-white">Spec discovery <Help label="About automatic spec discovery">Reads literal patterns, local constants and object spreads from the exported Cypress config. Imports and setup hooks do not execute. If environment values, imported helpers or hooks change discovery, use the advanced override.</Help></h3><p className="field-description">{project.discovery?.source === 'override' ? 'Using saved discovery overrides. Turn off the advanced override and save to use your Cypress config.' : `Read from ${project.discovery?.configFile ?? 'Cypress defaults'}. Edit patterns in your Cypress config, then Refresh specs.`}</p>
+            {project.discovery?.warning && <p role="status" className="text-sm text-amber-200">{project.discovery.warning}</p>}
+            {!overrideDiscovery && <div className="space-y-2 text-xs text-zinc-400"><p>Include: <code className="break-all">{project.discovery?.specPattern.join(', ') || 'No patterns resolved'}</code></p><p>Exclude: <code className="break-all">{project.discovery?.excludeSpecPattern.join(', ') || 'None'}</code></p></div>}
+            <details><summary className="cursor-pointer text-sm text-zinc-300">Advanced discovery override</summary><label className="mt-4 flex items-center gap-3 text-sm"><input type="checkbox" checked={overrideDiscovery} disabled={busy} onChange={event => setOverrideDiscovery(event.target.checked)} />Override Cypress discovery</label>{overrideDiscovery && <div className="mt-4 grid gap-4 lg:grid-cols-2"><div><label htmlFor="spec-patterns" className="field-label">Include patterns</label><textarea id="spec-patterns" rows={4} disabled={busy} value={patterns} onChange={event => setPatterns(event.target.value)} /></div><div><label htmlFor="exclude-patterns" className="field-label">Exclude patterns</label><textarea id="exclude-patterns" rows={4} disabled={busy} value={exclusions} onChange={event => setExclusions(event.target.value)} /></div></div>}</details>
         </section>
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-4"><p className="max-w-xl text-xs leading-5 text-zinc-400">Save writes shared project files. Commit the files listed in the save reminder to share your changes.</p><Button kind="primary" disabled={busy} onClick={() => void save()}>{saving ? 'Saving…' : project.initialized ? 'Save project settings' : 'Save and finish setup'}</Button></div>

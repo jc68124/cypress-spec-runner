@@ -3,6 +3,8 @@ import { createRequire } from 'node:module';
 import { access, mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { glob } from 'glob';
+import { specDiscovery } from './discovery';
+import type { SpecDiscovery } from '../shared/types';
 import { availableBrowsers, browsers, type Category, type CategoryFile, type Project, type ProjectConfig, type RunOptions, type SaveResult } from '../shared/types';
 
 export const configPath = 'spec-runner.config.json';
@@ -23,8 +25,7 @@ export async function defaults(root: string): Promise<ProjectConfig> {
     for (const file of ['cypress.config.ts', 'cypress.config.js', 'cypress.config.mjs', 'cypress.config.cjs']) {
         try { await access(path.join(root, file)); configFile = file; break; } catch { /* Try the next extension. */ }
     }
-    return { $schema: `./node_modules/${require('../../package.json').name}/schema.json`, version: 1, name: 'Cypress project', configFile, specPattern: ['cypress/e2e/**/*.cy.{js,jsx,ts,tsx}'],
-        excludeSpecPattern: ['**/node_modules/**', '**/snapshots/**', '**/__snapshots__/**', '**/__image_snapshots__/**'],
+    return { $schema: `./node_modules/${require('../../package.json').name}/schema.json`, version: 1, name: 'Cypress project', configFile,
         envFile: '.env', maxConcurrentRuns: 2, concurrencyGroups: [], browsers: [...browsers], profiles: [{ id: 'default', name: 'Default', args: [], env: {} }], defaultProfile: 'default' };
 }
 export function validateConfig(value: unknown): ProjectConfig {
@@ -34,6 +35,7 @@ export function validateConfig(value: unknown): ProjectConfig {
         if (config[field] !== null && !relativePath(config[field])) throw Error(`${field} must be a relative path inside this project, or null.`);
     }
     for (const field of ['specPattern', 'excludeSpecPattern'] as const) {
+        if (config[field] === undefined) continue;
         if (!Array.isArray(config[field]) || (field === 'specPattern' && !config[field].length)
             || config[field].some(pattern => !relativePath(pattern) || pattern.startsWith('!'))) throw Error(`${field} must contain project-relative glob patterns. Use exclusions to omit files.`);
     }
@@ -94,9 +96,10 @@ async function assertProject(directory: string): Promise<string> {
     catch { throw Error('Cypress is not installed in this project. Install its dependencies, then try again.'); }
     return root;
 }
-export async function discoverSpecs(root: string, config?: ProjectConfig): Promise<string[]> {
+export async function discoverSpecs(root: string, config?: ProjectConfig, resolved?: SpecDiscovery): Promise<string[]> {
     const settings = config ?? await defaults(root);
-    const files = await glob(settings.specPattern, { cwd: root, ignore: [...settings.excludeSpecPattern, '**/node_modules/**', '.git/**'], nodir: true, follow: false, posix: true });
+    const discovery = resolved ?? await specDiscovery(root, settings);
+    const files = await glob(discovery.specPattern, { cwd: root, dot: true, ignore: [...discovery.excludeSpecPattern.map(pattern => pattern.includes('/') ? pattern : '**/' + pattern), '**/node_modules/**', '.git/**'], nodir: true, follow: false, posix: true });
     const canonicalRoot = await realpath(root);
     const safe: string[] = [];
     for (const file of files) {
@@ -111,7 +114,8 @@ export async function loadProject(directory: string): Promise<Project> {
     const stored = await readJson(root, configPath);
     const config = stored ? validateConfig(stored.value) : await defaults(root);
     const categories = await readJson(root, categoryPath);
-    const specs = await discoverSpecs(root, config);
+    const discovery = await specDiscovery(root, config);
+    const specs = await discoverSpecs(root, config, discovery);
     const modified: [string, number][] = [];
     for (let start = 0; start < specs.length; start += 32) {
         modified.push(...await Promise.all(specs.slice(start, start + 32).map(async (spec): Promise<[string, number]> => {
@@ -121,7 +125,7 @@ export async function loadProject(directory: string): Promise<Project> {
     }
     return { root, config, configRevision: stored?.revision ?? 'missing', initialized: stored !== null,
         categories: categories ? validateCategories(categories.value).categories : [], revision: categories?.revision ?? 'missing',
-        specs, specModifiedTimes: Object.fromEntries(modified) };
+        specs, specModifiedTimes: Object.fromEntries(modified), discovery };
 }
 export async function findProject(directories: (string | undefined)[]): Promise<Project | null> {
     const tried = new Set<string>();

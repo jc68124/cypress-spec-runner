@@ -95,7 +95,7 @@ The optional profile `baseUrl` overrides the Cypress setting for that run. Leave
 
 ## Spec discovery and categories
 
-The standard Cypress end-to-end pattern is the default. For custom layouts, set `specPattern` and `excludeSpecPattern` in Settings to match the Cypress configuration. The runner deliberately does not execute arbitrary Cypress configuration or setup hooks while displaying files. Literal relative spec paths are stored in categories; new files appear as uncategorised until assigned.
+Discovery reads `e2e.specPattern` and `e2e.excludeSpecPattern` from the exported Cypress configuration, using Cypress defaults when absent. JavaScript and TypeScript exports, `defineConfig`, local constants and object spreads are supported. Project imports and setup hooks never execute while browsing. Patterns assembled through imports, environment values or functions need the collapsed **Settings → Advanced discovery override** section; unresolved configurations show a message rather than guessing. Existing saved overrides remain active until you disable the override and save. Refresh specs picks up config edits. Literal relative spec paths are stored in categories; new files appear as uncategorised until assigned.
 
 Categories can overlap. Unticking a category removes its files from the next selection, including shared files. Editing category assignments changes the shared file; selecting files for a run changes only local preferences. Missing assignments remain in the editor for repair and cannot be executed.
 

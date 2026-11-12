@@ -88,6 +88,11 @@ app.whenReady().then(async () => {
         assert(!document.body.textContent.includes('Saved locally.'),'Sorting created a shared-config commit reminder');
         button('Settings').click();
         await wait(()=>document.getElementById('project-name'));
+        const discoveryAdvanced=[...document.querySelectorAll('summary')].find(node=>node.textContent==='Advanced discovery override');
+        assert(discoveryAdvanced && !discoveryAdvanced.parentElement.open,'Discovery override is not collapsed by default');
+        discoveryAdvanced.click();
+        const override=[...document.querySelectorAll('label')].find(label=>label.textContent==='Override Cypress discovery').querySelector('input');
+        assert(override.checked,'Legacy discovery override was discarded');override.click();
         const follow=[...document.querySelectorAll('label')].find(l=>l.textContent.includes('Follow new output automatically'));
         follow.querySelector('input').click();
         assert(!document.body.textContent.includes('Saved locally.'),'Personal preference created commit reminder');
@@ -122,6 +127,7 @@ app.whenReady().then(async () => {
         assert(document.querySelector('aside[aria-label="Run controls"]').textContent.includes('Test environment'),'Saved environment not reflected in controls');
         const savedProject=await window.specRunner.project();
         assert(JSON.stringify(savedProject.config.browsers)===JSON.stringify(['electron']),'Browser choices were not saved');
+        assert(savedProject.config.specPattern===undefined && savedProject.config.excludeSpecPattern===undefined,'Automatic discovery still saved duplicate patterns');
         button('Configure run').click();await wait(()=>document.getElementById('run-browsers'));assert(document.querySelectorAll('#run-browsers input').length===1 && document.querySelector('[aria-label="Run in electron"]'),'Disabled browsers remain in run controls');button('Cancel',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));
         assert(document.getElementById('preferred-browser').value==='electron','Removed preferred browser was not replaced');
         assert([...document.getElementById('preferred-browser').options].map(option=>option.value).join(',')==='electron','Personal browser choices ignored project settings');
