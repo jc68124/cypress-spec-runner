@@ -43,6 +43,7 @@ test('large runs keep complete plain-text logs while visible history remains bou
     assert.equal(first.outputTruncated, true);
     assert.ok(first.outputStartLine > 0);
     assert.ok(!first.output.includes('EARLY FAILURE'));
+    assert.equal(await runner.copyText(), 'EARLY FAILURE\n' + text + 'FINAL LINE\n');
     assert.equal(await readFile(first.logPath!, 'utf8'), 'EARLY FAILURE\n' + text + 'FINAL LINE\n');
     await writeFile(cli, "console.error('SECOND RUN'); process.exitCode=1;");
     await runner.run(root, options); await until(() => !runner.active);
@@ -60,6 +61,7 @@ test('concurrent launches are blocked and stopping flushes the log and allows a 
     await runner.run(root, options);
     await assert.rejects(runner.run(root, options), /already active/);
     await until(() => runner.state.output.includes('waiting'));
+    assert.equal(await runner.copyText(), 'waiting\n');
     await runner.stop();
     assert.equal(runner.active, false);
     assert.equal(runner.state.status, 'stopped');

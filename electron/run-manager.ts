@@ -1,59 +1,114 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Runner } from './runner';
+import { PlainText } from './run-log';
 import { commandPreview, loadProject, validateRun } from './project';
-import type { ProjectConfig, RunJob, RunOptions } from '../shared/types';
-import { maxOpenRuns, pendingRun } from '../shared/runs';
+import type { MatrixOptions, MatrixResult, ProjectConfig, RunBatch, RunDetails, RunJob, RunOptions } from '../shared/types';
+import { matrixRuns, maxOpenBatches, maxOpenRuns, pendingRun, validateRunDetails } from '../shared/runs';
 
 type Entry = { job: RunJob; runner: Runner; config: ProjectConfig; options: RunOptions };
 export class RunManager {
     private entries = new Map<string, Entry>();
+    private groups = new Map<string, RunBatch>();
+    private nextBatchNumber = 1;
     private preparing = 0;
     private shuttingDown = false;
     private generation = 0;
     private nextNumber = 1;
     private stopping = new Map<string, Promise<void>>();
-    constructor(private readonly root: string, private readonly publish: (job: RunJob) => void) {}
+    constructor(private readonly root: string, private readonly publish: (job: RunJob) => void, private readonly publishBatch: (batch: RunBatch) => void = () => {}) {}
     get active(): boolean { return this.preparing > 0 || [...this.entries.values()].some(entry => pendingRun(entry.job)); }
     list(): RunJob[] { return [...this.entries.values()].map(entry => this.copy(entry.job)); }
     get(id: string): RunJob { return this.copy(this.entry(id).job); }
+    async copyText(id: string): Promise<string> {
+        const entry = this.entry(id);
+        if (!entry.job.logPath) {
+            if (!entry.job.output) throw Error('There is no output to copy yet.');
+            return new PlainText().write(entry.job.output);
+        }
+        return entry.runner.copyText();
+    }
     private copy(job: RunJob): RunJob { return { ...job, specs: [...job.specs] }; }
     private entry(id: string): Entry {
         const entry = typeof id === 'string' ? this.entries.get(id) : undefined;
         if (!entry) throw Error('This run no longer exists.');
         return entry;
     }
-    private notify(entry: Entry): void { entry.job.revision++; this.publish(this.copy(entry.job)); }
+    batches(): RunBatch[] { return [...this.groups.values()].map(batch => structuredClone(batch)); }
+    private group(id: string): RunBatch { const batch = this.groups.get(id); if (!batch) throw Error('This run group no longer exists.'); return batch; }
+    private notifyGroup(batch: RunBatch): void { batch.revision++; this.publishBatch(structuredClone(batch)); }
+    private notify(entry: Entry): void {
+        const batch = this.group(entry.job.batchId);
+        if (batch.statuses[entry.job.id] !== entry.job.status) { batch.statuses[entry.job.id] = entry.job.status; this.notifyGroup(batch); }
+        entry.job.revision++; this.publish(this.copy(entry.job));
+    }
+    private remove(entry: Entry): void {
+        this.entries.delete(entry.job.id);
+        this.publish({ ...this.copy(entry.job), revision: entry.job.revision + 1, removed: true, output: '' });
+    }
+    update(id: string, value: RunDetails): RunJob {
+        const entry = this.entry(id); Object.assign(entry.job, validateRunDetails(value)); this.notify(entry); return this.get(id);
+    }
+    renameBatch(id: string, name: string): RunBatch {
+        const batch = this.group(id); batch.name = validateRunDetails({ name, notes: '' }).name; this.notifyGroup(batch); return structuredClone(batch);
+    }
+    closeBatch(id: string): void {
+        const batch = this.group(id);
+        if (Object.values(batch.statuses).some(status => pendingRun({ status }))) throw Error('Finish, stop or cancel all runs before closing their group.');
+        for (const entry of this.entries.values()) if (entry.job.batchId === id) this.remove(entry);
+        this.groups.delete(id); this.publishBatch({ ...structuredClone(batch), revision: batch.revision + 1, removed: true });
+    }
     async enqueue(input: RunOptions): Promise<RunJob> {
+        const result = await this.enqueueMatrix({ specs: input?.specs, profiles: [input?.profile], browsers: [input?.browser], headed: input?.headed });
+        return result.runs[0];
+    }
+    async enqueueMatrix(input: MatrixOptions): Promise<MatrixResult> {
         if (this.shuttingDown) throw Error('The application is stopping its runs.');
-        if (this.entries.size + this.preparing >= maxOpenRuns) throw Error(`Close completed run tabs before adding more runs (maximum ${maxOpenRuns}).`);
+        const selection = structuredClone(input);
+        const combinations = matrixRuns(selection);
+        if (this.entries.size + this.preparing + combinations.length > maxOpenRuns) throw Error(`Close completed run tabs before adding more runs (maximum ${maxOpenRuns}).`);
         const generation = this.generation;
-        this.preparing++;
+        this.preparing += combinations.length;
         try {
             const project = await loadProject(this.root);
             const config = structuredClone(project.config);
-            const options = await validateRun(this.root, input, config);
+            const validated = await Promise.all(combinations.map(options => validateRun(this.root, options, config, project.specs)));
             if (this.shuttingDown || generation !== this.generation) throw Error('The application is stopping its runs.');
-            const id = randomUUID(), artifactDirectory = path.join(this.root, 'spec-runner-logs', id);
-            const profile = config.profiles.find(profile => profile.id === options.profile)!;
-            let entry: Entry;
-            const runner = new Runner(state => {
-                if (!this.entries.has(entry.job.id)) return;
-                Object.assign(entry.job, state);
-                if (!runner.active) entry.job.finishedAt = Date.now();
-                this.notify(entry);
-                if (!runner.active) this.schedule();
+            if (this.groups.size >= maxOpenBatches) {
+                const unused = [...this.groups.values()].find(batch => ![...this.entries.values()].some(entry => entry.job.batchId === batch.id));
+                if (unused) this.closeBatch(unused.id);
+                else throw Error('Close a completed run group before adding more groups.');
+            }
+            const batch: RunBatch = { id: randomUUID(), revision: 0, name: `${validated.length > 1 ? 'Matrix' : 'Run'} #${this.nextBatchNumber++}`,
+                createdAt: Date.now(), profiles: selection.profiles.map(id => ({ id, name: config.profiles.find(profile => profile.id === id)!.name })),
+                browsers: [...selection.browsers], specCount: validated[0].specs.length, statuses: {} };
+            const entries = validated.map(options => {
+                const id = randomUUID(), artifactDirectory = path.join(this.root, 'spec-runner-logs', id);
+                const profile = config.profiles.find(profile => profile.id === options.profile)!;
+                let entry: Entry;
+                const runner = new Runner(state => {
+                    if (!this.entries.has(id)) return;
+                    Object.assign(entry.job, state);
+                    if (!runner.active) entry.job.finishedAt = Date.now();
+                    this.notify(entry);
+                    if (!runner.active) this.schedule();
+                });
+                entry = { config, options: structuredClone(options), runner, job: {
+                    id, revision: 0, number: this.nextNumber++, batchId: batch.id, name: `${profile.name.replace(/[\x00\r\n]/g, ' ').slice(0, 85)} · ${options.browser}`, notes: '',
+                    status: 'queued', profileId: profile.id, profileName: profile.name, browser: options.browser, headed: options.headed, specs: [...options.specs],
+                    createdAt: batch.createdAt, startedAt: null, finishedAt: null, waitReason: null, artifactDirectory,
+                    output: '', command: commandPreview(options, config, artifactDirectory), exitCode: null,
+                    outputTruncated: false, outputStartLine: 0, logPath: null, logError: null,
+                } };
+                batch.statuses[id] = 'queued'; return entry;
             });
-            entry = { config, options: structuredClone(options), runner, job: {
-                id, revision: 0, number: this.nextNumber++, status: 'queued', profileId: profile.id, profileName: profile.name,
-                browser: options.browser, headed: options.headed, specs: [...options.specs],
-                createdAt: Date.now(), startedAt: null, finishedAt: null, waitReason: null, artifactDirectory,
-                output: '', command: commandPreview(options, config, artifactDirectory), exitCode: null,
-                outputTruncated: false, outputStartLine: 0, logPath: null, logError: null,
-            } };
-            this.entries.set(id, entry); this.notify(entry); this.schedule();
-            return this.get(id);
-        } finally { this.preparing--; }
+            this.groups.set(batch.id, batch);
+            for (const entry of entries) this.entries.set(entry.job.id, entry);
+            this.notifyGroup(batch);
+            for (const entry of entries) this.notify(entry);
+            this.schedule();
+            return { batch: structuredClone(batch), runs: entries.map(entry => this.get(entry.job.id)) };
+        } finally { this.preparing -= combinations.length; }
     }
     private waitReason(entry: Entry): string | null {
         const running = [...this.entries.values()].filter(other => ['running', 'stopping'].includes(other.job.status));
@@ -88,7 +143,7 @@ export class RunManager {
         const entry = this.entry(id);
         if (entry.job.status === 'queued') {
             entry.job.status = 'cancelled'; entry.job.finishedAt = Date.now(); entry.job.waitReason = null;
-            this.notify(entry); this.schedule(); return;
+            this.notify(entry); this.remove(entry); this.schedule(); return;
         }
         if (['running', 'stopping'].includes(entry.job.status)) {
             let stopping = this.stopping.get(id);
@@ -101,13 +156,13 @@ export class RunManager {
     }
     close(id: string): void {
         if (pendingRun(this.entry(id).job)) throw Error('Stop or cancel the run before closing its tab.');
-        this.entries.delete(id);
+        this.remove(this.entry(id));
     }
     async stopAll(): Promise<void> {
         this.shuttingDown = true; this.generation++;
         try {
             for (const entry of this.entries.values()) if (entry.job.status === 'queued') {
-                entry.job.status = 'cancelled'; entry.job.finishedAt = Date.now(); entry.job.waitReason = null; this.notify(entry);
+                entry.job.status = 'cancelled'; entry.job.finishedAt = Date.now(); entry.job.waitReason = null; this.notify(entry); this.remove(entry);
             }
             const results = await Promise.allSettled([...this.entries.values()].filter(entry => ['running', 'stopping'].includes(entry.job.status)).map(entry => this.stop(entry.job.id)));
             const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
