@@ -32,3 +32,6 @@ input::placeholder, textarea::placeholder { color: #71717a; }
 .dialog-panel { width: min(100%, 52rem); border: 1px solid #ffffff1a; border-radius: 1rem; background: #18181b; padding: 1.5rem; box-shadow: 0 1rem 4rem #0009; }
 .card { min-width: 0; border: 1px solid #ffffff1a; border-radius: .75rem; background: #18181b; }
 .settings-section { padding: 1.25rem; border: 1px solid #ffffff1a; border-radius: .75rem; background: #18181b; }
+
+::highlight(runner-find) { background: #fde047; color: #18181b; }
+::highlight(runner-find-current) { background: #fb923c; color: #18181b; }

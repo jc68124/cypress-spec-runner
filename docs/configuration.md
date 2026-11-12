@@ -111,7 +111,9 @@ Categories can overlap. Unticking a category removes its files from the next sel
 
 **Copy output** copies the selected run's complete plain-text log, rather than only the visible 500,000-character tail. During a live run it first flushes pending writes and copies a snapshot up to that point. Clipboard copies are limited to 20 MiB to keep memory bounded; oversized logs report an error rather than silently truncating. Use the saved file for larger logs. Copying includes ANSI-free text; run names and notes are not inserted into Cypress output.
 
-Scrolling upward in the terminal pauses **Follow output** so new lines do not move your reading position. Scrolling back to the bottom, or ticking **Follow output**, resumes it. This is a local preference.
+**Find output** or Ctrl/Cmd+F opens literal, case-insensitive search in the selected run’s visible history. Enter/Shift+Enter or the arrow buttons moves between highlighted matches; Escape closes search. The first 1,000 matches are highlighted to keep large logs responsive. Search does not alter ANSI formatting or copied output. Older text remains in the full saved log.
+
+**Jump to latest** moves to the bottom and resumes following. Scrolling upward in the terminal pauses **Follow output** so new lines do not move your reading position. Scrolling back to the bottom, or ticking **Follow output**, resumes it. This is a local preference.
 
 Each run gets a unique timestamp/profile log inside its own `spec-runner-logs/<run-id>/` directory. Logs are streamed with disk backpressure and are flushed before the run finishes or Stop returns. Files are retained until manually deleted. After a run finishes or stops, **Open log** opens its existing file in your default application. The action is available after queued writes have finished; it does not ask you to save another copy. If the system cannot open the file, the app reports the error. Logs remain separate from the 500,000-character live output buffer. A write failure is reported without changing Cypress's exit result; if a log cannot be created, the run does not start.
 
