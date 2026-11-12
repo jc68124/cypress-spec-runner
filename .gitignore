@@ -6,3 +6,4 @@ dist/
 spec-runner-logs/
 .env
 .env.local
+.pnpm-store/
