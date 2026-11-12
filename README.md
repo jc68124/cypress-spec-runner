@@ -16,14 +16,15 @@ With pnpm, use `pnpm add -D @jc68124/cypress-spec-runner`, `pnpm exec cypress-sp
 
 The initializer creates project configuration, categories based on spec folders, a launch script, and Git ignore entries. Commit the files listed by the initializer. Other contributors only need to install the project's dependencies and supply their usual local environment values. The published package includes the built interface; consuming projects do not need frontend build tools. Electron downloads its runtime on first launch if necessary.
 
-Open **Settings** to configure project names, run profiles, base URLs, local environment files, available browsers, extra Cypress arguments, and spec patterns. Shared saves show a reminder listing the files to commit. Browser choices, selections, and output preferences are stored locally per checkout.
+Open **Settings** to configure project names, run profiles, base URLs, local environment files, available browsers, run limits, shared environment groups, extra Cypress arguments, and spec patterns. Shared saves show a reminder listing the files to commit. Browser choices, selections, and output preferences are stored locally per checkout.
 
 ## Run tests
 
 - Select categories or individual specs; overlapping categories count a file once.
 - Use **View specs** to adjust a run selection, or **Edit category** to change shared assignments.
-- Choose a profile and browser, then start the run. **Stop run** stops its child processes.
-- The output view keeps the latest 500,000 characters. Complete plain-text logs are saved in `spec-runner-logs/`; use **Open log** after a run finishes or stops to open the saved file in your default application.
+- Choose a profile and browser, then start a run. Each run gets a separate tab; you can prepare another while it runs. **Stop run** affects only the selected run; **Cancel queued run** removes a waiting run from the queue.
+- Settings defaults to two simultaneous runs overall and one per profile. Shared groups let profiles targeting the same environment share a limit. Waiting runs start automatically when capacity is available.
+- Each run keeps the latest 500,000 characters in its output view. Complete plain-text logs are saved in `spec-runner-logs/`; use **Open log** after a run finishes or stops to open the saved file in your default application.
 
 The runner uses the selected project's Cypress version, plugins, and reporters. It does not add environment flags, recording options, or project-specific services automatically. Configure those through profiles when needed. Custom include/exclude patterns must agree with the Cypress configuration; dynamic Cypress configuration is not executed merely to browse specs.
 
@@ -48,7 +49,7 @@ Run `pnpm build` and `pnpm test` from the container terminal. For interactive de
 SPEC_RUNNER_PROJECT=/workspaces/example-project node node_modules/electron/cli.js --no-sandbox .
 ```
 
-The `--no-sandbox` flag is for this isolated development container; normal project launch commands are unchanged. A Windows host path must be mounted or the project cloned inside the container before using it here. CI also builds the devcontainer and runs the project checks inside it.
+The `--no-sandbox` flag is for this isolated development container; normal project launch commands are unchanged. A Windows host path must be mounted or the project cloned inside the container before using it here. CI builds and checks the devcontainer when `.devcontainer/` changes. Ordinary changes use the Windows and Linux checks.
 
 `npm pack` builds a ready-to-install package. Run `npm run smoke` afterward to test it in a separate fixture project. CI checks Windows and Linux and uploads the package as an artifact.
 

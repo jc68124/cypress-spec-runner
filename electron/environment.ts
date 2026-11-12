@@ -3,7 +3,7 @@ import path from 'node:path';
 import { parseEnv } from 'node:util';
 import type { ProjectConfig } from '../shared/types';
 
-export async function runEnvironment(root: string, config: ProjectConfig, profileId: string): Promise<NodeJS.ProcessEnv> {
+export async function runEnvironment(root: string, config: ProjectConfig, profileId: string, runtime: NodeJS.ProcessEnv = {}): Promise<NodeJS.ProcessEnv> {
     let local: NodeJS.ProcessEnv = {};
     if (config.envFile) {
         try {
@@ -13,7 +13,7 @@ export async function runEnvironment(root: string, config: ProjectConfig, profil
             local = parseEnv(await readFile(file, 'utf8'));
         } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
-    const env: NodeJS.ProcessEnv = { ...local, ...process.env };
+    const env: NodeJS.ProcessEnv = { ...local, ...process.env, ...runtime };
     const profile = config.profiles.find(profile => profile.id === profileId);
     if (!profile) throw Error('The selected profile no longer exists.');
     for (const [key, value] of Object.entries(profile.env)) {
@@ -22,6 +22,7 @@ export async function runEnvironment(root: string, config: ProjectConfig, profil
             return env[name]!;
         });
     }
+    Object.assign(env, runtime);
     env.FORCE_COLOR = '1';
     delete env.ELECTRON_RUN_AS_NODE;
     delete env.NO_COLOR;
