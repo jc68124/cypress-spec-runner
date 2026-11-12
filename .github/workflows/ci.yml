@@ -45,3 +45,36 @@ jobs:
             pnpm test
             npm pack --ignore-scripts
             pnpm run smoke
+
+  release:
+    name: Version or publish package
+    needs: [validate, devcontainer]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-master
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --global pnpm@11.25.0
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build
+      - name: Create version PR or publish to npm
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1
+        with:
+          version: pnpm version-packages
+          publish: pnpm release
+          title: Release Cypress Spec Runner
+          commit: 'chore: version package'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

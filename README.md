@@ -50,4 +50,8 @@ SPEC_RUNNER_PROJECT=/workspaces/example-project node node_modules/electron/cli.j
 
 The `--no-sandbox` flag is for this isolated development container; normal project launch commands are unchanged. A Windows host path must be mounted or the project cloned inside the container before using it here. CI also builds the devcontainer and runs the project checks inside it.
 
-`npm pack` builds a ready-to-install package. Run `npm run smoke` afterward to test it in a separate fixture project. CI checks Windows and Linux and uploads the package as an artifact. Publishing is a separate release step; no credentials belong in this repository.
+`npm pack` builds a ready-to-install package. Run `npm run smoke` afterward to test it in a separate fixture project. CI checks Windows and Linux and uploads the package as an artifact.
+
+## Releases
+
+Run `pnpm changeset` for a user-facing change and commit the generated file. After merging to `master`, CI opens a version and changelog PR. Merging that PR publishes `@jc68124/cypress-spec-runner` to npm after all checks pass. See [one-time npm publishing setup](docs/releases.md).
