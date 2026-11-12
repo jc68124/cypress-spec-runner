@@ -8,6 +8,7 @@
     },
     "main": "out/electron/main.js",
     "files": [
+        "assets",
         "bin",
         "out/electron",
         "out/shared",

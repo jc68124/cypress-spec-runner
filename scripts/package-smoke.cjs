@@ -41,6 +41,7 @@ async function main() {
         await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'example-consumer', private: true, devDependencies: { cypress: 'file:./fake-cypress', [ownPackage.name]: 'file:' + archive } }));
         await execute(process.execPath, installArguments(process.env.npm_execpath, process.env.npm_config_user_agent), root);
         const installed = await fs.realpath(path.join(root, 'node_modules', ownPackage.name));
+        for (const filename of ['icon.svg', 'icon.png', 'icon.ico']) await fs.access(path.join(installed, 'assets', filename));
         const setup = await execute(process.execPath, [path.join(installed, 'bin/cypress-spec-runner.cjs'), 'init'], root);
         assert.match(setup, /Commit these files/);
         const configured = JSON.parse(await fs.readFile(path.join(root, 'spec-runner.config.json'), 'utf8'));
@@ -56,7 +57,9 @@ async function main() {
         await fs.writeFile(path.join(root, '.env'), 'EXAMPLE_LOCAL_VALUE=fixture-value');
         const harness = path.join(root, 'desktop-check.cjs');
         await fs.writeFile(harness, `
-            const { app, BrowserWindow, shell, dialog } = require('electron');
+            const { app, BrowserWindow, shell, dialog, nativeImage } = require('electron');
+            const icon = nativeImage.createFromPath(${JSON.stringify(path.join(installed, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'))});
+            if (icon.isEmpty() || icon.getSize().width < 16) throw Error('Packaged application icon is missing or invalid');
             const openedLogs = [];
             shell.openPath = async file => { openedLogs.push(file); return openedLogs.length === 1 ? 'No default application is configured.' : ''; };
             dialog.showSaveDialog = async () => { throw Error('The existing log should open without a save dialog'); };
