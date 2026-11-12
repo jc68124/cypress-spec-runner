@@ -7,12 +7,12 @@ A configurable desktop companion for choosing Cypress specs, organizing categori
 Requires Node.js 22.12 or newer and an existing Cypress installation.
 
 ```sh
-npm install --save-dev cypress-spec-runner
+npm install --save-dev @jc68124/cypress-spec-runner
 npx cypress-spec-runner init
 npm run spec-runner
 ```
 
-With pnpm, use `pnpm add -D cypress-spec-runner`, `pnpm exec cypress-spec-runner init`, and `pnpm spec-runner`.
+With pnpm, use `pnpm add -D @jc68124/cypress-spec-runner`, `pnpm exec cypress-spec-runner init`, and `pnpm spec-runner`.
 
 The initializer creates project configuration, categories based on spec folders, a launch script, and Git ignore entries. Commit the files listed by the initializer. Other contributors only need to install the project's dependencies and supply their usual local environment values. The published package includes the built interface; consuming projects do not need frontend build tools. Electron downloads its runtime on first launch if necessary.
 
