@@ -9,6 +9,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #a5b4fc; outline-offset: 3px; }
 input:not([type=checkbox]), select, textarea { width: 100%; min-width: 0; border: 1px solid #ffffff26; border-radius: .5rem; background: #18181b; padding: .55rem .7rem; color: #f4f4f5; font: inherit; font-size: .875rem; }
 input[type=checkbox] { accent-color: #818cf8; width: 1rem; height: 1rem; flex-shrink: 0; margin: .15rem 0 0; cursor: pointer; }
+input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .55; }
 input::placeholder, textarea::placeholder { color: #71717a; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border: 1px solid transparent; border-radius: .5rem; padding: .45rem .8rem; font-size: .875rem; line-height: 1.25rem; font-weight: 600; white-space: nowrap; }
 .btn-outline { border-color: #ffffff26; color: #e4e4e7; background: transparent; }

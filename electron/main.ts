@@ -24,7 +24,8 @@ function handle(channel: string, handler: (...args: any[]) => unknown): void {
     });
 }
 async function save(action: () => Promise<unknown>): Promise<unknown> {
-    if (saving || runs?.active) throw Error('Wait for the current run or save to finish before changing shared settings.');
+    if (runs?.active) throw Error('Shared settings are locked while runs are active or queued. Finish or stop active runs and cancel queued runs first.');
+    if (saving) throw Error('Wait for the current save to finish before changing shared settings.');
     saving = true;
     try { return await action(); } finally { saving = false; }
 }
