@@ -23,7 +23,7 @@ export async function defaults(root: string): Promise<ProjectConfig> {
     for (const file of ['cypress.config.ts', 'cypress.config.js', 'cypress.config.mjs', 'cypress.config.cjs']) {
         try { await access(path.join(root, file)); configFile = file; break; } catch { /* Try the next extension. */ }
     }
-    return { $schema: './node_modules/cypress-spec-runner/schema.json', version: 1, name: 'Cypress project', configFile, specPattern: ['cypress/e2e/**/*.cy.{js,jsx,ts,tsx}'],
+    return { $schema: `./node_modules/${require('../../package.json').name}/schema.json`, version: 1, name: 'Cypress project', configFile, specPattern: ['cypress/e2e/**/*.cy.{js,jsx,ts,tsx}'],
         excludeSpecPattern: ['**/node_modules/**', '**/snapshots/**', '**/__snapshots__/**', '**/__image_snapshots__/**'],
         envFile: '.env', profiles: [{ id: 'default', name: 'Default', args: [], env: {} }], defaultProfile: 'default' };
 }
