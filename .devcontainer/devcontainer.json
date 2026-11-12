@@ -1,0 +1,33 @@
+{
+    "name": "Cypress Spec Runner development",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "."
+    },
+    "features": {
+        "ghcr.io/devcontainers/features/desktop-lite:1": {}
+    },
+    "remoteUser": "node",
+    "mounts": [
+        "source=cypress-spec-runner-${devcontainerId}-node-modules,target=${containerWorkspaceFolder}/node_modules,type=volume"
+    ],
+    "containerEnv": {
+        "VNC_RESOLUTION": "1920x1080"
+    },
+    "forwardPorts": [6080],
+    "portsAttributes": {
+        "6080": {
+            "label": "Development desktop",
+            "onAutoForward": "notify"
+        }
+    },
+    "postCreateCommand": "bash .devcontainer/post-create.sh",
+    "customizations": {
+        "vscode": {
+            "extensions": ["bradlc.vscode-tailwindcss"],
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash"
+            }
+        }
+    }
+}

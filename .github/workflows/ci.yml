@@ -28,3 +28,17 @@ jobs:
           name: cypress-spec-runner-package-${{ matrix.os }}
           path: '*.tgz'
           if-no-files-found: error
+
+  devcontainer:
+    name: Validate devcontainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build devcontainer and run project checks
+        uses: devcontainers/ci@v0.3
+        with:
+          push: never
+          runCmd: |
+            pnpm build
+            pnpm test

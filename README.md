@@ -38,4 +38,16 @@ pnpm test
 node bin/cypress-spec-runner.cjs --project /path/to/a/cypress-project
 ```
 
+### Devcontainer
+
+Open this repository in VS Code and choose **Dev Containers: Reopen in Container**. The container supplies Node.js 24, the pinned pnpm version, Linux desktop libraries, and a browser-accessible desktop. First-time setup installs dependencies and builds the app. `node_modules` stays in a container volume, separate from host dependencies.
+
+Run `pnpm build` and `pnpm test` from the container terminal. For interactive desktop testing, open forwarded port **6080** from VS Code's Ports panel and connect using the desktop feature's default password, `vscode`. Then launch against a Cypress project that is available inside the container:
+
+```sh
+SPEC_RUNNER_PROJECT=/workspaces/example-project node node_modules/electron/cli.js --no-sandbox .
+```
+
+The `--no-sandbox` flag is for this isolated development container; normal project launch commands are unchanged. A Windows host path must be mounted or the project cloned inside the container before using it here. CI also builds the devcontainer and runs the project checks inside it.
+
 `npm pack` builds a ready-to-install package. Run `npm run smoke` afterward to test it in a separate fixture project. CI checks Windows and Linux and uploads the package as an artifact. Publishing is a separate release step; no credentials belong in this repository.
