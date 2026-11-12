@@ -54,6 +54,35 @@ Choose the project's browser list in **Settings → Available browsers**, then s
 
 Run controls and the personal preferred-browser setting show only the saved project choices. If a previously selected browser is removed, the runner selects the first enabled browser. Cypress uses the selected browser's local installation; configure the list to match what your team supports.
 
+## Concurrent runs and environment limits
+
+Use **Settings → Run scheduling** to set `maxConcurrentRuns` (default **2**). Each profile has its own `maxConcurrentRuns` (default **1**). Values must be integers from 1 to 8. Existing configurations get these defaults without an initializer migration.
+
+Profiles that target the same environment can share a concurrency group. Add a group with a name and combined run limit, then assign the relevant profiles to it. For example:
+
+```json
+{
+    "maxConcurrentRuns": 2,
+    "concurrencyGroups": [
+        { "id": "staging", "name": "Shared staging", "maxConcurrentRuns": 1 }
+    ]
+}
+```
+
+In each applicable profile, set `"maxConcurrentRuns": 1` and `"concurrencyGroup": "staging"`. Profiles without a shared group omit `concurrencyGroup`. The overall, profile, and group limits must all allow a run to start. A waiting profile does not block an unrelated profile that has capacity. Limits apply to this application instance; coordinate other tools or app instances separately when they use the same systems.
+
+The **Runs** view keeps independent tabs with each run's profile, browser, state, elapsed time, output, command, and saved log. Start another run using the sidebar or **New run**. Each submission captures the specs and shared runner settings at submission time; changing the next selection does not alter submitted runs. Local environment-file values are read when the queued run actually starts. Project files remain in the checkout, so edits to Cypress configuration or test code still apply when Cypress reads those files.
+
+**Cancel queued run** prevents a waiting run from starting. **Stop run** stops only that tab's process tree. Completed, failed, stopped, and cancelled tabs stay until closed; closing a tab frees its visible history and retains its log files. The app supports up to 50 open run tabs to bound memory. Tabs and queues are session-only. Closing the app asks before stopping active runs and cancelling queued ones.
+
+Shared configuration/category saves are locked while runs are active or queued. Run selections, browser/profile choices, and personal output preferences remain editable. After changing scheduling settings, save and commit the listed project files as usual.
+
+### Run files and custom reporters
+
+Each run uses its own `spec-runner-logs/<run-id>/` directory. The runner passes unique `screenshotsFolder`, `videosFolder`, and `downloadsFolder` values to Cypress while retaining other profile `--config` overrides. Tests should use `Cypress.config('downloadsFolder')` rather than a hard-coded download location.
+
+Custom reporters and plugins may write to their own locations. Configure their output directory using `process.env.SPEC_RUNNER_ARTIFACTS_DIR` in your Cypress configuration, preserving the other reporter options, or use `${SPEC_RUNNER_ARTIFACTS_DIR}` in profile arguments supported by your reporter. `SPEC_RUNNER_RUN_ID` is also available. For example, a JUnit reporter can use `mochaFile=${SPEC_RUNNER_ARTIFACTS_DIR}/reports/result.xml`. These runtime values are generated per run; do not store absolute local paths or credentials in the shared configuration. A reporter/plugin that ignores those settings still needs its own output-isolation configuration before concurrent use.
+
 ## Custom launch options
 
 Profiles have an optional JSON list of `args`, available under **Advanced arguments and environment variables**. Each item is a separate Cypress argument, for example `["--config", "video=false"]`. Arguments are passed directly without a shell. Choose flags supported by the project's installed Cypress version. The runner controls `--spec` and `--project`; profiles cannot override them. The app always runs end-to-end specs in this first release.
@@ -68,4 +97,4 @@ Categories can overlap. Unticking a category removes its files from the next sel
 
 ## Logs
 
-Each run gets a unique timestamp/profile log under `spec-runner-logs/`. Logs are streamed with disk backpressure and are flushed before the run finishes or Stop returns. Files are retained until manually deleted. After a run finishes or stops, **Open log** opens its existing file in your default application. The action is available after queued writes have finished; it does not ask you to save another copy. If the system cannot open the file, the app reports the error. Logs remain separate from the 500,000-character live output buffer. A write failure is reported without changing Cypress's exit result; if a log cannot be created, the run does not start.
+Each run gets a unique timestamp/profile log inside its own `spec-runner-logs/<run-id>/` directory. Logs are streamed with disk backpressure and are flushed before the run finishes or Stop returns. Files are retained until manually deleted. After a run finishes or stops, **Open log** opens its existing file in your default application. The action is available after queued writes have finished; it does not ask you to save another copy. If the system cannot open the file, the app reports the error. Logs remain separate from the 500,000-character live output buffer. A write failure is reported without changing Cypress's exit result; if a log cannot be created, the run does not start.

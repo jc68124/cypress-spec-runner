@@ -5,6 +5,30 @@ on:
 permissions:
   contents: read
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      devcontainer: ${{ steps.paths.outputs.devcontainer }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check devcontainer paths
+        id: paths
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$BASE_SHA"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base=$(git hash-object -w -t tree --stdin < /dev/null)
+          fi
+          if git diff --quiet "$base" "$GITHUB_SHA" -- .devcontainer; then
+            echo "devcontainer=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "devcontainer=true" >> "$GITHUB_OUTPUT"
+          fi
+
   validate:
     strategy:
       fail-fast: false
@@ -30,6 +54,8 @@ jobs:
           if-no-files-found: error
 
   devcontainer:
+    needs: changes
+    if: needs.changes.outputs.devcontainer == 'true'
     name: Validate devcontainer
     runs-on: ubuntu-latest
     timeout-minutes: 25

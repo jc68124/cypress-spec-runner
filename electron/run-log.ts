@@ -40,8 +40,8 @@ export class RunLog {
     private readonly text = new PlainText();
     private constructor(readonly path: string, readonly stream: WriteStream) {}
 
-    static async create(root: string, environment: string): Promise<RunLog> {
-        const directory = path.join(root, 'spec-runner-logs');
+    static async create(root: string, environment: string, runDirectory?: string): Promise<RunLog> {
+        const directory = runDirectory ?? path.join(root, 'spec-runner-logs');
         await mkdir(directory, { recursive: true });
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const file = path.join(directory, `${timestamp}-${environment}-${randomUUID()}.log`);

@@ -6,7 +6,10 @@ export interface RunProfile {
     baseUrl?: string;
     args: string[];
     env: Record<string, string>;
+    maxConcurrentRuns?: number;
+    concurrencyGroup?: string;
 }
+export interface ConcurrencyGroup { id: string; name: string; maxConcurrentRuns: number }
 export interface ProjectConfig {
     $schema?: string;
     version: 1;
@@ -16,6 +19,8 @@ export interface ProjectConfig {
     excludeSpecPattern: string[];
     envFile: string | null;
     browsers?: Browser[];
+    maxConcurrentRuns?: number;
+    concurrencyGroups?: ConcurrencyGroup[];
     profiles: RunProfile[];
     defaultProfile: string;
 }
@@ -43,6 +48,22 @@ export interface RunState {
     logPath: string | null;
     logError: string | null;
 }
+export interface RunJob extends Omit<RunState, 'status'> {
+    id: string;
+    revision: number;
+    number: number;
+    status: RunState['status'] | 'queued' | 'cancelled';
+    profileId: string;
+    profileName: string;
+    browser: Browser;
+    headed: boolean;
+    specs: string[];
+    createdAt: number;
+    startedAt: number | null;
+    finishedAt: number | null;
+    waitReason: string | null;
+    artifactDirectory: string;
+}
 export interface RunnerAPI {
     project(): Promise<Project>;
     refresh(): Promise<Project>;
@@ -50,10 +71,12 @@ export interface RunnerAPI {
     saveConfig(config: ProjectConfig, revision: string): Promise<SaveResult>;
     saveCategories(categories: Category[], revision: string): Promise<SaveResult>;
     preview(options: RunOptions): Promise<string>;
-    run(options: RunOptions): Promise<RunState>;
-    stop(): Promise<void>;
-    openLog(): Promise<void>;
-    state(): Promise<RunState>;
-    onRunState(listener: (state: RunState) => void): () => void;
+    run(options: RunOptions): Promise<RunJob>;
+    runs(): Promise<RunJob[]>;
+    stop(id: string): Promise<void>;
+    closeRun(id: string): Promise<void>;
+    openLog(id: string): Promise<void>;
+    state(id: string): Promise<RunJob>;
+    onRunState(listener: (state: RunJob) => void): () => void;
     copy(text: string): Promise<void>;
 }

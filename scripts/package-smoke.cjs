@@ -70,15 +70,17 @@ async function main() {
                             const project=await window.specRunner.project();
                             const unavailable = await window.specRunner.preview({specs:project.specs,profile:project.config.defaultProfile,browser:'chrome',headed:false}).then(()=>null,error=>error.message);
                             if(!unavailable) throw Error('A disabled browser was accepted');
-                            const noLog = await window.specRunner.openLog().then(()=>null,error=>error.message);
+                            const noLog = await window.specRunner.openLog('missing').then(()=>null,error=>error.message);
                             if(!noLog) throw Error('A missing log was opened');
-                            await window.specRunner.run({specs:project.specs,profile:project.config.defaultProfile,browser:'electron',headed:false});
+                            const job=await window.specRunner.run({specs:project.specs,profile:project.config.defaultProfile,browser:'electron',headed:false});
                             for(let index=0;index<300;index++){
-                                const state=await window.specRunner.state();
+                                const state=await window.specRunner.state(job.id);
                                 if(state.status==='passed') {
-                                    const failure = await window.specRunner.openLog().then(()=>null,error=>error.message);
+                                    const failure = await window.specRunner.openLog(job.id).then(()=>null,error=>error.message);
                                     if(!failure || !failure.includes('No default application is configured.')) throw Error('Log open failure was hidden');
-                                    await window.specRunner.openLog();
+                                    await window.specRunner.openLog(job.id);
+                                    await window.specRunner.closeRun(job.id);
+                                    if((await window.specRunner.runs()).length) throw Error('Closing a completed run left its tab behind');
                                     return state;
                                 }
                                 if(state.status==='failed') throw Error(state.output);
@@ -105,6 +107,9 @@ async function main() {
         const result = JSON.parse(state.output);
         assert.equal(result.value, 'fixture-value');
         assert.ok(result.args.includes('cypress/e2e/example.cy.ts'));
+        assert.equal(path.dirname(state.logPath), state.artifactDirectory);
+        const artifactConfig = JSON.parse(result.args[result.args.indexOf('--config') + 1]);
+        assert.equal(artifactConfig.downloadsFolder, path.join(state.artifactDirectory, 'downloads'));
         assert.equal(await fs.readFile(state.logPath, 'utf8'), state.output);
         console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools.');
     } finally { await fs.rm(root, { recursive: true, force: true }); }

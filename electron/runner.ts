@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import type { RunOptions, RunState } from '../shared/types';
+import type { ProjectConfig, RunOptions, RunState } from '../shared/types';
 import { commandPreview, loadProject, runArguments, validateRun } from './project';
 import { stopWindowsProcess } from './windows-stop';
 import { RunLog } from './run-log';
@@ -37,22 +37,22 @@ export class Runner {
         if (!this.timer) this.timer = setTimeout(() => { this.timer = undefined; this.emit(); }, outputUpdateInterval * Math.max(1, Math.ceil(this.current.output.length / 250_000)));
     }
 
-    async run(root: string, input: RunOptions): Promise<RunState> {
+    async run(root: string, input: RunOptions, snapshot?: ProjectConfig, artifacts?: { id: string; directory: string }): Promise<RunState> {
         if (this.busy) throw new Error('A run is already active. Stop it before starting another.');
         this.busy = true;
         let ready!: () => void;
         this.starting = new Promise<void>(resolve => { ready = resolve; });
         this.stopped = false;
         try {
-            const options = await validateRun(root, input);
+            const options = await validateRun(root, input, snapshot);
             const requireFromProject = createRequire(path.join(root, 'package.json'));
             const packageFile = requireFromProject.resolve('cypress/package.json');
             const cypressPackage = requireFromProject('cypress/package.json') as { bin: { cypress: string } };
             const cli = path.resolve(path.dirname(packageFile), cypressPackage.bin.cypress);
-            const project = await loadProject(root);
-            const env = await runEnvironment(root, project.config, options.profile);
-            const args = runArguments(options, project.config, env);
-            const log = await RunLog.create(root, options.profile);
+            const config = snapshot ?? (await loadProject(root)).config;
+            const env = await runEnvironment(root, config, options.profile, artifacts ? { SPEC_RUNNER_RUN_ID: artifacts.id, SPEC_RUNNER_ARTIFACTS_DIR: artifacts.directory } : {});
+            const args = runArguments(options, config, env, artifacts?.directory);
+            const log = await RunLog.create(root, options.profile, artifacts?.directory);
             this.log = log;
             const resume = () => { this.child?.stdout?.resume(); this.child?.stderr?.resume(); };
             log.stream.on('drain', resume);
@@ -61,7 +61,7 @@ export class Runner {
                 resume();
                 this.emit();
             });
-            this.current = { status: 'running', output: '', command: commandPreview(options, project.config), exitCode: null, outputTruncated: false, outputStartLine: 0, logPath: log.path, logError: null };
+            this.current = { status: 'running', output: '', command: commandPreview(options, config, artifacts?.directory), exitCode: null, outputTruncated: false, outputStartLine: 0, logPath: log.path, logError: null };
             const child = spawn(this.executable, [cli, ...args], {
                 cwd: root,
                 env,

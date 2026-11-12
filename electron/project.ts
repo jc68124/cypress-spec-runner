@@ -25,7 +25,7 @@ export async function defaults(root: string): Promise<ProjectConfig> {
     }
     return { $schema: `./node_modules/${require('../../package.json').name}/schema.json`, version: 1, name: 'Cypress project', configFile, specPattern: ['cypress/e2e/**/*.cy.{js,jsx,ts,tsx}'],
         excludeSpecPattern: ['**/node_modules/**', '**/snapshots/**', '**/__snapshots__/**', '**/__image_snapshots__/**'],
-        envFile: '.env', browsers: [...browsers], profiles: [{ id: 'default', name: 'Default', args: [], env: {} }], defaultProfile: 'default' };
+        envFile: '.env', maxConcurrentRuns: 2, concurrencyGroups: [], browsers: [...browsers], profiles: [{ id: 'default', name: 'Default', args: [], env: {} }], defaultProfile: 'default' };
 }
 export function validateConfig(value: unknown): ProjectConfig {
     const config = value as ProjectConfig;
@@ -39,6 +39,16 @@ export function validateConfig(value: unknown): ProjectConfig {
     }
     if (config.browsers !== undefined && (!Array.isArray(config.browsers) || !config.browsers.length
         || config.browsers.some(browser => !browsers.includes(browser)) || new Set(config.browsers).size !== config.browsers.length)) throw Error('Choose at least one supported browser, without duplicates.');
+    const validLimit = (value: unknown) => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 8;
+    if (config.maxConcurrentRuns !== undefined && !validLimit(config.maxConcurrentRuns)) throw Error('The overall concurrency limit must be an integer from 1 to 8.');
+    const groups = config.concurrencyGroups === undefined ? [] : config.concurrencyGroups;
+    if (!Array.isArray(groups)) throw Error('Concurrency groups must be a list.');
+    const groupIds = new Set<string>(), groupNames = new Set<string>();
+    for (const group of groups) {
+        if (!group || typeof group.id !== 'string' || !idPattern.test(group.id) || typeof group.name !== 'string' || !group.name.trim() || group.name.length > 100
+            || !validLimit(group.maxConcurrentRuns) || groupIds.has(group.id) || groupNames.has(group.name.trim().toLowerCase())) throw Error('Concurrency groups need unique IDs/names and limits from 1 to 8.');
+        groupIds.add(group.id); groupNames.add(group.name.trim().toLowerCase());
+    }
     if (!Array.isArray(config.profiles) || !config.profiles.length) throw Error('Create at least one run profile.');
     const ids = new Set<string>();
     const names = new Set<string>();
@@ -46,6 +56,8 @@ export function validateConfig(value: unknown): ProjectConfig {
         if (!profile || typeof profile.id !== 'string' || !idPattern.test(profile.id) || typeof profile.name !== 'string' || !profile.name.trim() || profile.name.length > 100
             || ids.has(profile.id) || names.has(profile.name.trim().toLowerCase())) throw Error('Each profile needs a unique ID and name.');
         ids.add(profile.id); names.add(profile.name.trim().toLowerCase());
+        if (profile.maxConcurrentRuns !== undefined && !validLimit(profile.maxConcurrentRuns)) throw Error('Profile concurrency limits must be integers from 1 to 8.');
+        if (profile.concurrencyGroup !== undefined && (typeof profile.concurrencyGroup !== 'string' || !groupIds.has(profile.concurrencyGroup))) throw Error('Choose an existing concurrency group or no group.');
         if (!Array.isArray(profile.args) || profile.args.some(arg => typeof arg !== 'string' || /[\x00\r\n]/.test(arg)
             || arg === '--' || /^(?:--(?:spec|project|browser|headed|e2e|component)|-[sPb])(?:=|$)/.test(arg))) throw Error('Profile arguments must be a list of strings. The runner controls --spec and --project.');
         if (!profile.env || typeof profile.env !== 'object' || Array.isArray(profile.env)
@@ -53,7 +65,7 @@ export function validateConfig(value: unknown): ProjectConfig {
         if (profile.baseUrl !== undefined && typeof profile.baseUrl !== 'string') throw Error('Base URL must be text.');
     }
     if (typeof config.defaultProfile !== 'string' || !ids.has(config.defaultProfile)) throw Error('Choose an existing default profile.');
-    return { ...config, name: config.name.trim(), browsers: [...availableBrowsers(config)], profiles: config.profiles.map(profile => ({ ...profile, name: profile.name.trim() })) };
+    return { ...config, maxConcurrentRuns: config.maxConcurrentRuns ?? 2, concurrencyGroups: groups.map(group => ({ ...group, name: group.name.trim() })), name: config.name.trim(), browsers: [...availableBrowsers(config)], profiles: config.profiles.map(profile => ({ ...profile, maxConcurrentRuns: profile.maxConcurrentRuns ?? 1, name: profile.name.trim() })) };
 }
 export function validateCategories(value: unknown): CategoryFile {
     const file = value as CategoryFile;
@@ -180,33 +192,74 @@ export async function initializeProject(root: string, chosenConfig?: ProjectConf
     if (missing.length) { await writeFile(path.join(root, '.gitignore'), ignore + (ignore.endsWith('\n') || !ignore ? '' : '\n') + missing.join('\n') + '\n'); changedFiles.push('.gitignore'); }
     return { project: await loadProject(root), changedFiles };
 }
-export async function validateRun(root: string, value: unknown): Promise<RunOptions> {
+export async function validateRun(root: string, value: unknown, snapshot?: ProjectConfig): Promise<RunOptions> {
     const options = value as RunOptions;
-    const project = await loadProject(root);
+    const project = snapshot ? { config: validateConfig(snapshot), specs: await discoverSpecs(root, snapshot) } : await loadProject(root);
     if (!options || !Array.isArray(options.specs) || !options.specs.length || options.specs.some(spec => !literalSpec(spec))) throw Error('Select at least one valid spec file.');
     if (!project.config.profiles.some(profile => profile.id === options.profile) || !availableBrowsers(project.config).includes(options.browser) || typeof options.headed !== 'boolean') throw Error('Invalid profile, browser, or run options.');
     if (options.specs.some(spec => !project.specs.includes(spec))) throw Error('A selected spec no longer exists or does not match the configured patterns. Refresh your specs.');
     return { ...options, specs: [...new Set(options.specs)].sort() };
 }
-export function runArguments(options: RunOptions, config: ProjectConfig, environment: NodeJS.ProcessEnv = process.env): string[] {
+function configValues(value: string): Record<string, unknown> {
+    if (value.trim().startsWith('{')) {
+        const parsed = JSON.parse(value);
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw Error('Cypress --config must be a JSON object or key=value pairs.');
+        return parsed;
+    }
+    // Commas inside glob braces, JSON arrays, or quoted values are not separators.
+    const parts: string[] = [];
+    let start = 0, depth = 0, quote = '', escaped = false;
+    for (let index = 0; index < value.length; index++) {
+        const char = value[index];
+        if (escaped) { escaped = false; continue; }
+        if (char === '\\') { escaped = true; continue; }
+        if (quote) { if (char === quote) quote = ''; continue; }
+        if (char === '"' || char === "'") { quote = char; continue; }
+        if ('[{'.includes(char)) depth++;
+        if (']}'.includes(char)) depth--;
+        if (char === ',' && depth === 0) { parts.push(value.slice(start, index)); start = index + 1; }
+    }
+    parts.push(value.slice(start));
+    const config: Record<string, unknown> = Object.create(null);
+    for (const part of parts) {
+        const equal = part.indexOf('=');
+        if (equal < 1) throw Error('Use JSON or key=value pairs for Cypress --config.');
+        const key = part.slice(0, equal).trim(), raw = part.slice(equal + 1).trim();
+        try { config[key] = JSON.parse(raw); } catch { config[key] = raw; }
+    }
+    return config;
+}
+function argumentsFor(options: RunOptions, config: ProjectConfig, expand: (value: string) => string, artifactDirectory?: string): string[] {
     const profile = config.profiles.find(profile => profile.id === options.profile);
     if (!profile) throw Error('The selected profile no longer exists.');
+    const source = profile.args.map(expand), args: string[] = [];
+    const overrides: Record<string, unknown> = Object.create(null);
+    for (let index = 0; index < source.length; index++) {
+        if (source[index] === '--config' || source[index] === '-c' || source[index].startsWith('--config=')) {
+            const value = ['--config', '-c'].includes(source[index]) ? source[++index] : source[index].slice(9);
+            if (!value) throw Error('Supply a value after --config.');
+            Object.assign(overrides, configValues(value));
+        } else args.push(source[index]);
+    }
+    if (profile.baseUrl) overrides.baseUrl = expand(profile.baseUrl);
+    if (artifactDirectory) Object.assign(overrides, {
+        screenshotsFolder: path.join(artifactDirectory, 'screenshots'), videosFolder: path.join(artifactDirectory, 'videos'), downloadsFolder: path.join(artifactDirectory, 'downloads'),
+    });
+    return ['run', '--e2e', ...(config.configFile ? ['--config-file', config.configFile] : []), ...args,
+        ...(Object.keys(overrides).length ? ['--config', JSON.stringify(overrides)] : []), '--browser', options.browser,
+        ...(options.headed ? ['--headed'] : []), '--spec', options.specs.join(',')];
+}
+export function runArguments(options: RunOptions, config: ProjectConfig, environment: NodeJS.ProcessEnv = process.env, artifactDirectory?: string): string[] {
     const expand = (value: string) => value.replace(/\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (_, key: string) => {
         if (environment[key] === undefined) throw Error(`Environment variable ${key} is missing. Set it locally before running.`);
         return environment[key]!;
     });
-    const baseUrl = profile.baseUrl ? expand(profile.baseUrl) : '';
-    if (baseUrl && !/^https?:\/\//i.test(baseUrl)) throw Error('Base URL must start with http:// or https://.');
-    return ['run', '--e2e', ...(config.configFile ? ['--config-file', config.configFile] : []), ...profile.args.map(expand),
-        ...(baseUrl ? ['--config', JSON.stringify({ baseUrl })] : []), '--browser', options.browser,
-        ...(options.headed ? ['--headed'] : []), '--spec', options.specs.join(',')];
-}
-export function commandPreview(options: RunOptions, config: ProjectConfig): string {
-    // Keep environment references as references; previews never expand local secret values.
     const profile = config.profiles.find(profile => profile.id === options.profile);
-    if (!profile) throw Error('The selected profile no longer exists.');
-    const args = ['run', '--e2e', ...(config.configFile ? ['--config-file', config.configFile] : []), ...profile.args,
-        ...(profile.baseUrl ? ['--config', JSON.stringify({ baseUrl: profile.baseUrl })] : []), '--browser', options.browser,
-        ...(options.headed ? ['--headed'] : []), '--spec', options.specs.join(',')];
-    return 'cypress ' + args.map(arg => JSON.stringify(arg)).join(' ');
+    const baseUrl = profile?.baseUrl ? expand(profile.baseUrl) : '';
+    if (baseUrl && !/^https?:\/\//i.test(baseUrl)) throw Error('Base URL must start with http:// or https://.');
+    return argumentsFor(options, config, expand, artifactDirectory);
+}
+export function commandPreview(options: RunOptions, config: ProjectConfig, artifactDirectory?: string): string {
+    // Keep environment references as references; previews never expand local secret values.
+    return 'cypress ' + argumentsFor(options, config, value => value, artifactDirectory).map(arg => JSON.stringify(arg)).join(' ');
 }
