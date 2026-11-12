@@ -12,6 +12,7 @@ let saving = false;
 let quitting = false;
 let confirmingClose = false;
 const html = realpathSync.native(path.resolve(__dirname, '../../dist/index.html'));
+const icon = path.resolve(__dirname, '../../assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
 let runs: RunManager;
 function handle(channel: string, handler: (...args: any[]) => unknown): void {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
@@ -26,6 +27,7 @@ async function save(action: () => Promise<unknown>): Promise<unknown> {
 }
 app.whenReady().then(async () => {
     nativeTheme.themeSource = 'dark';
+    if (process.platform === 'darwin') app.dock?.setIcon(icon);
     const project = await findProject([process.env.SPEC_RUNNER_PROJECT, process.cwd()]);
     if (!project) throw Error('No Cypress project found. Start the runner from your project folder.');
     root = project.root;
@@ -52,7 +54,7 @@ app.whenReady().then(async () => {
         clipboard.writeText(text);
     });
     window = new BrowserWindow({ width: 1440, height: 960, minWidth: 980, minHeight: 700, title: 'Cypress Spec Runner',
-        backgroundColor: '#09090b', autoHideMenuBar: true,
+        backgroundColor: '#09090b', autoHideMenuBar: true, icon,
         webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', (event, url) => { if (!isAppDocumentUrl(url, html)) event.preventDefault(); });
