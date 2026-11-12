@@ -1,8 +1,6 @@
 name: Release package
 on:
-  workflow_run:
-    workflows: ['Validate package']
-    types: [completed]
+  push:
     branches: [master]
 
 permissions:
@@ -13,13 +11,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    name: Validate package
+    uses: ./.github/workflows/ci.yml
+
   release:
     name: Version or publish package
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'master' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -29,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
