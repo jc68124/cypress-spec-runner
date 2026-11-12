@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Category, MatrixOptions, Project, ProjectConfig, RunOptions, RunJob, RunBatch, SaveResult } from '../shared/types';
+import type { Category, NotificationStatus, MatrixOptions, Project, ProjectConfig, RunOptions, RunJob, RunBatch, SaveResult } from '../shared/types';
 import { availableBrowsers } from '../shared/types';
 import { mergeBatch, mergeRun, pendingRun } from '../shared/runs';
 import { RunOutput } from './RunOutput';
@@ -11,13 +11,14 @@ import { CategoryEditor } from './CategoryEditor';
 import { Settings } from './Settings';
 import { RunSetup } from './RunSetup';
 type View = 'categories' | 'specs' | 'output' | 'settings';
-type Preferences = { selected: string[]; profile: string; browser: RunOptions['browser']; headed: boolean; follow: boolean; specSort: SpecSort; profiles: string[]; browsers: RunOptions['browser'][] };
-const initialPreferences: Preferences = { selected: [], profile: '', browser: 'chrome', headed: false, follow: true, specSort: 'name-asc', profiles: [], browsers: [] };
+type Preferences = { selected: string[]; profile: string; browser: RunOptions['browser']; headed: boolean; follow: boolean; specSort: SpecSort; profiles: string[]; browsers: RunOptions['browser'][]; notify: boolean };
+const initialPreferences: Preferences = { selected: [], profile: '', browser: 'chrome', headed: false, follow: true, specSort: 'name-asc', profiles: [], browsers: [], notify: false };
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 function readPreferences(root: string): Preferences {
     try { return { ...initialPreferences, ...JSON.parse(localStorage.getItem(`spec-runner:${root}`) ?? '{}') }; } catch { return initialPreferences; }
 }
 export function App() {
+    const [notificationState, setNotificationState] = useState<NotificationStatus>({ enabled: false, supported: false });
     const [project, setProject] = useState<Project | null>(null);
     const [view, setView] = useState<View>('categories');
     const [preferences, setPreferences] = useState(initialPreferences);
@@ -62,7 +63,7 @@ export function App() {
                 profiles: profiles.length ? profiles : [profile], browsers: chosenBrowsers.length ? chosenBrowsers : [browser],
                 profile: next.config.profiles.some(profile => profile.id === saved.profile) ? saved.profile : next.config.defaultProfile,
                 browser: availableBrowsers(next.config).includes(saved.browser) ? saved.browser : availableBrowsers(next.config)[0], headed: !!saved.headed, follow: saved.follow !== false,
-                specSort: specSortOrders.includes(saved.specSort) ? saved.specSort : 'name-asc' };
+                specSort: specSortOrders.includes(saved.specSort) ? saved.specSort : 'name-asc', notify: saved.notify === true };
         });
         setProject(next);
         if (first && !next.initialized) setView('settings');
@@ -80,13 +81,21 @@ export function App() {
         let alive = true;
         if (!window.specRunner) { setError('Start the app using the spec-runner command in a Cypress project.'); setLoading(false); return; }
         const unsubscribe = window.specRunner.onRunState(state => { if (alive) acceptRun(state); });
+        const unsubscribeNotifications = window.specRunner.onNotificationStatus(status => { if (alive) { setNotificationState(status); if (status.error) setError(status.error); } });
+        const unsubscribeClick = window.specRunner.onNotificationClick(id => { if (alive) { if (id) setSelectedRun(id); setView('output'); } });
         const unsubscribeBatches = window.specRunner.onBatchState(state => { if (alive) acceptBatch(state); });
         void Promise.all([window.specRunner.project(), window.specRunner.runs(), window.specRunner.batches()]).then(([next, jobs, groups]) => {
             if (alive) { acceptProject(next); jobs.forEach(acceptRun); groups.forEach(acceptBatch); }
         }).catch(error => { if (alive) setError(message(error)); }).finally(() => { if (alive) setLoading(false); });
-        return () => { alive = false; unsubscribe(); unsubscribeBatches(); };
+        return () => { alive = false; unsubscribe(); unsubscribeBatches(); unsubscribeNotifications(); unsubscribeClick(); };
     }, []);
     useEffect(() => { if (project) { try { localStorage.setItem(`spec-runner:${project.root}`, JSON.stringify(preferences)); } catch { /* Optional local preferences. */ } } }, [preferences, project?.root]);
+    useEffect(() => {
+        if (!project) return;
+        let alive = true;
+        void window.specRunner.notifications(preferences.notify).then(status => { if (alive) setNotificationState(status); }).catch(error => { if (alive) setError(message(error)); });
+        return () => { alive = false; };
+    }, [preferences.notify, project?.root]);
     const selected = preferences.selected;
     const available = useMemo(() => new Set(project?.specs ?? []), [project?.specs]);
     const selectedSpecs = useMemo(() => selected.filter(spec => available.has(spec)), [selected, available]);
@@ -138,7 +147,7 @@ export function App() {
                         })}</div>{!project.categories.length && <div className="rounded-lg border border-dashed border-white/15 p-8 text-center text-sm text-zinc-400">Create a category to group specs, or select files in Individual specs.</div>}{!!uncategorised.length && <Button small kind="plain" onClick={() => { setFilter('uncategorised'); setSearch(''); setView('specs'); }}>{uncategorised.length} uncategorised specs · Review and select</Button>}
                     </div>}
                     {view === 'specs' && <div className="space-y-5"><h2 className="text-xl font-semibold text-white">Individual specs</h2><p className="text-sm text-zinc-400">Fine-tune the same selection used by your categories.</p><div className="grid grid-cols-2 gap-3 xl:grid-cols-[minmax(0,1fr)_11rem_13rem]"><div className="col-span-2 xl:col-span-1"><label htmlFor="spec-search" className="field-label">Search specs</label><input id="spec-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by file or folder…" /></div><div><label htmlFor="spec-filter" className="field-label">Filter specs</label><select id="spec-filter" value={filter} onChange={event => setFilter(event.target.value)}><option value="all">All specs</option><option value="selected">Selected only</option><option value="uncategorised">Uncategorised</option>{project.categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div><div><label htmlFor="spec-sort" className="field-label">Sort by <Help label="About sorting specs">Alphabetical order uses file names, then paths for matching names. Edit dates come from local files, rather than Git history. Use Refresh specs after editing files. Missing dates appear last. This choice is saved only on this computer.</Help></label><select id="spec-sort" value={preferences.specSort} onChange={event => setPreferences(current => ({ ...current, specSort: event.target.value as SpecSort }))}><option value="name-asc">File name A–Z</option><option value="name-desc">File name Z–A</option><option value="modified-desc">Recently edited first</option><option value="modified-asc">Oldest edited first</option></select></div></div><div className="card overflow-hidden"><div className="flex items-center justify-between border-b border-white/10 p-3"><label className="flex items-center gap-3 text-sm"><Checkbox label="Select shown specs" checked={selectionState(selectedSpecs, visibleSpecs) === 'all'} partial={selectionState(selectedSpecs, visibleSpecs) === 'some'} disabled={!visibleSpecs.length} onChange={checked => toggle(visibleSpecs, checked)} />Select shown</label><span className="text-xs text-zinc-400">{visibleSpecs.length} shown</span></div><SpecList specs={visibleSpecs} selected={selectedSpecs} onToggle={toggle} modifiedTimes={preferences.specSort.startsWith('modified-') ? project.specModifiedTimes : undefined} /></div></div>}
-                    {view === 'settings' && <Settings key={project.configRevision} project={project} disabled={active || pending} onSave={saveSettings} browser={preferences.browser} setBrowser={browser => setPreferences(current => ({ ...current, browser, browsers: [browser] }))} follow={preferences.follow} setFollow={follow => setPreferences(current => ({ ...current, follow }))} />}
+                    {view === 'settings' && <Settings notify={preferences.notify} setNotify={notify => setPreferences(current => ({ ...current, notify }))} notificationState={notificationState} testNotification={() => operation(async () => { await window.specRunner.testNotification(); })} key={project.configRevision} project={project} disabled={active || pending} onSave={saveSettings} browser={preferences.browser} setBrowser={browser => setPreferences(current => ({ ...current, browser, browsers: [browser] }))} follow={preferences.follow} setFollow={follow => setPreferences(current => ({ ...current, follow }))} />}
                     {view === 'output' && <RunOutput created={result => { result.runs.forEach(acceptRun); acceptBatch(result.batch); setSelectedRun(result.runs[0]?.id ?? null); }} runs={runs} batches={batches} selectedId={selectedRun} select={setSelectedRun} follow={preferences.follow} setFollow={follow => setPreferences(current => ({ ...current, follow }))} pending={pending} prepare={() => setView('categories')} operation={operation} close={async id => { await window.specRunner.closeRun(id); removedRuns.current.add(id); setRuns(current => current.filter(run => run.id !== id)); }} /> }
                 </div>
             </section>

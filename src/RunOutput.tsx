@@ -35,6 +35,7 @@ export function RunOutput({ runs, batches, selectedId, select, follow, setFollow
     const batch = batches.find(batch => batch.id === groupId) ?? batches.find(batch => batch.id === selected?.batchId) ?? batches.at(-1);
     const groupRuns = runs.filter(run => run.batchId === batch?.id);
     const job = groupRuns.find(run => run.id === selectedId) ?? groupRuns.at(-1);
+    useEffect(() => { if (job) document.getElementById(`run-tab-${job.id}`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [job?.id]);
     useEffect(() => { if (!job || !pendingRun(job)) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [job?.id, job?.status]);
     useEffect(() => {
         if (follow && output.current) { output.current.scrollTop = output.current.scrollHeight; previousScrollTop.current = output.current.scrollTop; }

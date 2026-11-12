@@ -86,8 +86,13 @@ export interface RunJob extends Omit<RunState, 'status'> {
     waitReason: string | null;
     artifactDirectory: string;
 }
+export interface NotificationStatus { enabled: boolean; supported: boolean; error?: string }
 export interface RunnerAPI {
     project(): Promise<Project>;
+    notifications(enabled?: boolean): Promise<NotificationStatus>;
+    testNotification(): Promise<void>;
+    onNotificationStatus(listener: (status: NotificationStatus) => void): () => void;
+    onNotificationClick(listener: (runId: string | null) => void): () => void;
     refresh(): Promise<Project>;
     initialize(config?: ProjectConfig): Promise<SaveResult>;
     saveConfig(config: ProjectConfig, revision: string): Promise<SaveResult>;

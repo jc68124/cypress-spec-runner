@@ -96,6 +96,13 @@ app.whenReady().then(async () => {
         const follow=[...document.querySelectorAll('label')].find(l=>l.textContent.includes('Follow new output automatically'));
         follow.querySelector('input').click();
         assert(!document.body.textContent.includes('Saved locally.'),'Personal preference created commit reminder');
+        const completionNotifications=document.querySelector('[aria-label="Notify when a run group finishes"]');
+        await wait(()=>!completionNotifications.disabled);assert(!completionNotifications.checked,'Desktop notifications are not opt-in by default');completionNotifications.click();
+        await wait(()=>!button('Send test notification').disabled);button('Send test notification').click();
+        await wait(()=>button('Send test notification')&&!button('Send test notification').disabled);
+        assert((await window.specRunner.project()).testNotificationSent,'Test notification did not call the desktop API');
+        assert(!document.body.textContent.includes('Saved locally.'),'Notification preference created a commit reminder');
+
         const help=document.querySelector('[aria-label="About local environment files"]');
         help.click();
         await wait(()=>document.querySelector('[role=tooltip]'));
@@ -166,6 +173,7 @@ app.whenReady().then(async () => {
         assert(!document.getElementById('preferred-browser').disabled,'Personal preferences were locked');
         const personalFollow=[...document.querySelectorAll('label')].find(label=>label.textContent.includes('Follow new output automatically')).querySelector('input');
         assert(!personalFollow.disabled,'Personal follow preference was locked');
+        assert(!document.querySelector('[aria-label="Notify when a run group finishes"]').disabled,'Notification preference was locked during runs');
         personalFollow.click();
         button('View runs',lock()).click();
         await wait(()=>tab(3) && button('Cancel queued run'));
@@ -268,6 +276,7 @@ app.whenReady().then(async () => {
         button('Rerun failed').click();await wait(()=>tab(11));
         button('Stop run').click();await wait(()=>tab(11).textContent.includes('Stopped'));
         button('Rerun group').click();await wait(()=>tab(12));button('Stop run').click();await wait(()=>tab(12).textContent.includes('Stopped'));
+        await wait(()=>{const selected=tab(12).getBoundingClientRect(),list=document.querySelector('[aria-label="Run list"]').getBoundingClientRect();return selected.top>=list.top && selected.bottom<=list.bottom;});
         return 'Setup, profile editing, category selection/editing, commit reminders, personal preferences, accessible help, browser restrictions, independent run tabs, queue cancellation, concurrency settings, and 1080p density passed.';
     })()`);
     if (process.env.SPEC_RUNNER_UI_SCREENSHOT) { win.show(); await new Promise(resolve => setTimeout(resolve, 1500)); require('node:fs').writeFileSync(process.env.SPEC_RUNNER_UI_SCREENSHOT, (await win.webContents.capturePage()).toPNG()); }

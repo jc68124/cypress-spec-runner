@@ -1,5 +1,7 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, shell, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { BatchNotifier, type CompletionNotice } from './batch-notifier';
 import { realpathSync } from 'node:fs';
 import { isAppDocumentUrl } from './app-url';
 import { commandPreview, findProject, initializeProject, loadProject, saveCategories, saveConfig, validateRun } from './project';
@@ -10,6 +12,7 @@ import type { MatrixOptions, RunDetails } from '../shared/types';
 
 const appName = 'Cypress Spec Runner';
 app.setName(appName);
+const notificationAppId = 'CypressSpecRunner.Desktop';
 
 let window: BrowserWindow;
 let root: string;
@@ -19,6 +22,49 @@ let confirmingClose = false;
 const html = realpathSync.native(path.resolve(__dirname, '../../dist/index.html'));
 const icon = path.resolve(__dirname, '../../assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
 let runs: RunManager;
+let notificationError: string | undefined;
+let notificationGeneration = 0;
+const notifications = new BatchNotifier(showNotice, () => notificationFailed());
+function notificationStatus() { return { enabled: notifications.enabled, supported: Notification.isSupported(), ...(notificationError ? { error: notificationError } : {}) }; }
+function notificationFailed() {
+    if (!notifications.enabled) return;
+    notificationError = 'Desktop notifications could not be delivered. Check system notification settings and try the test notification.';
+    if (window && !window.isDestroyed()) window.webContents.send('notifications:status', notificationStatus());
+}
+function showNotice(notice: CompletionNotice): void {
+    if (!Notification.isSupported()) throw Error('Desktop notifications are unavailable in this session.');
+    const notification = new Notification({ title: notice.title, body: notice.body, icon });
+    notification.on('failed', notificationFailed);
+    notification.on('click', () => {
+        if (!window || window.isDestroyed()) return;
+        if (window.isMinimized()) window.restore(); window.show(); window.focus();
+        const rows = runs.list().filter(run => run.batchId === notice.batchId);
+        window.webContents.send('notifications:click', (rows.find(run => run.status === 'failed') ?? rows[0])?.id ?? null);
+    });
+    notification.show();
+}
+async function configureNotifications(enabled?: boolean) {
+    if (enabled === undefined) return notificationStatus();
+    if (typeof enabled !== 'boolean') throw Error('Invalid notification preference.');
+    const generation = ++notificationGeneration;
+    notificationError = undefined; notifications.enabled = false;
+    if (enabled && !Notification.isSupported()) notificationError = 'Desktop notifications are unavailable in this session.';
+    else if (enabled) {
+        try {
+            if (process.platform === 'win32') {
+                app.setAppUserModelId(notificationAppId); app.setToastActivatorCLSID('{DDA2B0C2-2485-46F1-A857-401C56E9424A}');
+                const directory = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', appName);
+                await mkdir(directory, { recursive: true });
+                if (generation !== notificationGeneration) return notificationStatus();
+                const written = shell.writeShortcutLink(path.join(directory, `${appName}.lnk`), 'create', { target: process.execPath, args: `"${path.resolve(__dirname, '../..')}"`, cwd: root, description: appName, icon, iconIndex: 0, appUserModelId: notificationAppId, toastActivatorClsid: app.toastActivatorCLSID });
+                if (!written) throw Error('Could not register the Start menu entry.');
+            }
+            if (generation === notificationGeneration) notifications.enabled = true;
+        } catch { if (generation === notificationGeneration) notificationError = 'Desktop notifications could not be enabled. Check notification permissions and try again.'; }
+    }
+    return notificationStatus();
+}
+
 function handle(channel: string, handler: (...args: any[]) => unknown): void {
     ipcMain.handle(channel, (event: IpcMainInvokeEvent, ...args: unknown[]) => {
         if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !isAppDocumentUrl(event.senderFrame?.url, html)) throw Error('Untrusted application window.');
@@ -37,7 +83,9 @@ app.whenReady().then(async () => {
     const project = await findProject([process.env.SPEC_RUNNER_PROJECT, process.cwd()]);
     if (!project) throw Error('No Cypress project found. Start the runner from your project folder.');
     root = project.root;
-    runs = new RunManager(root, job => { if (window && !window.isDestroyed()) window.webContents.send('run:changed', job); }, batch => { if (window && !window.isDestroyed()) window.webContents.send('batch:changed', batch); });
+    runs = new RunManager(root, job => { if (window && !window.isDestroyed()) window.webContents.send('run:changed', job); }, batch => { notifications.observe(batch); if (window && !window.isDestroyed()) window.webContents.send('batch:changed', batch); });
+    handle('notifications:configure', configureNotifications);
+    handle('notifications:test', () => { if (!notifications.enabled) throw Error('Enable desktop notifications first.'); showNotice({ batchId: '', title: appName, body: 'You will be notified when a run group finishes.' }); });
     handle('project:get', () => loadProject(root));
     handle('project:refresh', () => loadProject(root));
     handle('project:initialize', (config?: ProjectConfig) => save(() => initializeProject(root, config)));
@@ -89,6 +137,6 @@ app.on('before-quit', event => {
     void (async () => {
         const result = await dialog.showMessageBox(window, { title: appName, type: 'question', buttons: ['Keep running', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'Cypress runs are still active or queued.', detail: 'Closing cancels queued runs and stops all running Cypress processes.' });
         if (result.response !== 1) { confirmingClose = false; return; }
-        try { await runs.stopAll(); quitting = true; app.quit(); } catch (error) { dialog.showErrorBox('Could not stop all runs', String(error)); confirmingClose = false; }
+        try { notifications.suspended = true; await runs.stopAll(); quitting = true; app.quit(); } catch (error) { notifications.suspended = false; dialog.showErrorBox('Could not stop all runs', String(error)); confirmingClose = false; }
     })();
 });
