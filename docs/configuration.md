@@ -4,6 +4,8 @@ Run `cypress-spec-runner init`, then use **Settings**. The runner saves shared s
 
 The app never commits or pushes files automatically. A save reminder identifies the files written by the app. Personal preferences are stored locally and do not trigger commit reminders.
 
+**Individual specs** defaults to file name A–Z, with Z–A, recently edited, and oldest edited sorting also available. The choice is remembered locally per project and works with search and category/selection filters. Date sorting shows local file modification times, rather than Git commit dates; use **Refresh specs** after editing files. Files without an available date appear last.
+
 ## Example profiles
 
 All example addresses and variables below are placeholders. This configuration can be used by any project.

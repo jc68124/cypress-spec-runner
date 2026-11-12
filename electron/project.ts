@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { access, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { glob } from 'glob';
 import { availableBrowsers, browsers, type Category, type CategoryFile, type Project, type ProjectConfig, type RunOptions, type SaveResult } from '../shared/types';
@@ -111,9 +111,17 @@ export async function loadProject(directory: string): Promise<Project> {
     const stored = await readJson(root, configPath);
     const config = stored ? validateConfig(stored.value) : await defaults(root);
     const categories = await readJson(root, categoryPath);
+    const specs = await discoverSpecs(root, config);
+    const modified: [string, number][] = [];
+    for (let start = 0; start < specs.length; start += 32) {
+        modified.push(...await Promise.all(specs.slice(start, start + 32).map(async (spec): Promise<[string, number]> => {
+            try { return [spec, (await stat(path.join(root, spec))).mtimeMs]; }
+            catch { return [spec, 0]; } // Missing timestamps sort last; a disappearing file must not prevent refresh.
+        })));
+    }
     return { root, config, configRevision: stored?.revision ?? 'missing', initialized: stored !== null,
         categories: categories ? validateCategories(categories.value).categories : [], revision: categories?.revision ?? 'missing',
-        specs: await discoverSpecs(root, config) };
+        specs, specModifiedTimes: Object.fromEntries(modified) };
 }
 export async function findProject(directories: (string | undefined)[]): Promise<Project | null> {
     const tried = new Set<string>();

@@ -32,6 +32,7 @@ export interface Project {
     config: ProjectConfig;
     configRevision: string;
     specs: string[];
+    specModifiedTimes: Record<string, number>;
     categories: Category[];
     revision: string;
     initialized: boolean;

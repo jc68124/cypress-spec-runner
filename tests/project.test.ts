@@ -1,12 +1,25 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, readFile, rm, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, symlink, utimes } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { configPath, categoryPath, defaults, discoverSpecs, findProject, initializeProject, loadProject, saveCategories, saveConfig, validateConfig, validateRun, runArguments, commandPreview } from '../electron/project';
 import { runEnvironment } from '../electron/environment';
 
 import { fixture } from './helpers';
+test('loading a project reads only discovered spec edit times and refreshes them after a local edit', async t => {
+    const root = await fixture(t);
+    const spec = 'cypress/e2e/features/Example.cy.ts';
+    const firstEdit = new Date('2025-01-01T12:00:00Z'), nextEdit = new Date('2025-01-02T12:00:00Z');
+    await utimes(path.join(root, spec), firstEdit, firstEdit);
+    const first = await loadProject(root);
+    assert.deepEqual(Object.keys(first.specModifiedTimes), first.specs);
+    assert.equal(first.specModifiedTimes[spec], firstEdit.getTime());
+    await utimes(path.join(root, spec), nextEdit, nextEdit);
+    assert.equal((await loadProject(root)).specModifiedTimes[spec], nextEdit.getTime());
+    assert.equal(first.specModifiedTimes[spec], firstEdit.getTime());
+});
+
 test('initialization creates shared configuration, folder categories, launch script and ignore entries without overwriting later edits', async t => {
     const root = await fixture(t);
     const first = await initializeProject(root);

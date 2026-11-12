@@ -2,7 +2,7 @@ const { contextBridge } = require('electron');
 let revision = 0, callback = () => {}, sequence = 0;
 let jobs = [];
 const specs = ['cypress/e2e/account/Sign in.cy.ts', 'cypress/e2e/account/Sign out.cy.ts', 'cypress/e2e/catalog/Search.cy.ts'];
-let project = { root: '/example-project', initialized: false, configRevision: 'missing', revision: 'missing', specs, categories: [], config: {
+let project = { root: '/example-project', initialized: false, configRevision: 'missing', revision: 'missing', specs, specModifiedTimes: { [specs[0]]: 2000, [specs[1]]: 3000, [specs[2]]: 1000 }, categories: [], config: {
     version: 1, name: 'Example project', configFile: 'cypress.config.ts', specPattern: ['cypress/e2e/**/*.cy.{js,jsx,ts,tsx}'], excludeSpecPattern: ['**/node_modules/**'], envFile: '.env',
     profiles: [{ id: 'default', name: 'Default', args: [], env: {} }], defaultProfile: 'default'
 } };
@@ -19,7 +19,7 @@ function pump() {
     }
 }
 contextBridge.exposeInMainWorld('specRunner', {
-    project: async () => project, refresh: async () => project, runs: async () => jobs,
+    project: async () => project, refresh: async () => { project = { ...project, specModifiedTimes: { ...project.specModifiedTimes, [specs[2]]: 4000 } }; return project; }, runs: async () => jobs,
     state: async id => { const job = jobs.find(job => job.id === id); if (!job) throw Error('Unknown run'); return job; },
     onRunState: listener => { callback = listener; return () => {}; },
     initialize: async config => { project = { ...project, config: normalize(config ?? project.config), initialized: true, configRevision: String(++revision), revision: String(revision), categories: [{ id: 'account', name: 'Account', specs: specs.slice(0,2) }, { id: 'catalog', name: 'Catalog', specs: specs.slice(2) }] }; return { project, changedFiles: ['spec-runner.config.json', '.spec-runner/categories.json', 'package.json', '.gitignore'] }; },
