@@ -6,6 +6,9 @@ import { commandPreview, findProject, initializeProject, loadProject, saveCatego
 import { RunManager } from './run-manager';
 import type { Category, ProjectConfig, RunOptions } from '../shared/types';
 
+const appName = 'Cypress Spec Runner';
+app.setName(appName);
+
 let window: BrowserWindow;
 let root: string;
 let saving = false;
@@ -53,7 +56,7 @@ app.whenReady().then(async () => {
         if (typeof text !== 'string' || text.length > 250_000) throw Error('Invalid clipboard content.');
         clipboard.writeText(text);
     });
-    window = new BrowserWindow({ width: 1440, height: 960, minWidth: 980, minHeight: 700, title: 'Cypress Spec Runner',
+    window = new BrowserWindow({ width: 1440, height: 960, minWidth: 980, minHeight: 700, title: appName,
         backgroundColor: '#09090b', autoHideMenuBar: true, icon,
         webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -68,7 +71,7 @@ app.on('before-quit', event => {
     if (confirmingClose) return;
     confirmingClose = true;
     void (async () => {
-        const result = await dialog.showMessageBox(window, { type: 'question', buttons: ['Keep running', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'Cypress runs are still active or queued.', detail: 'Closing cancels queued runs and stops all running Cypress processes.' });
+        const result = await dialog.showMessageBox(window, { title: appName, type: 'question', buttons: ['Keep running', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'Cypress runs are still active or queued.', detail: 'Closing cancels queued runs and stops all running Cypress processes.' });
         if (result.response !== 1) { confirmingClose = false; return; }
         try { await runs.stopAll(); quitting = true; app.quit(); } catch (error) { dialog.showErrorBox('Could not stop all runs', String(error)); confirmingClose = false; }
     })();
