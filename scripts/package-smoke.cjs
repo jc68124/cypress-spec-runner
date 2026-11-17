@@ -35,9 +35,11 @@ async function main() {
     try {
         await fs.mkdir(path.join(root, 'fake-cypress/bin'), { recursive: true });
         await fs.mkdir(path.join(root, 'cypress/e2e'), { recursive: true });
-        await fs.writeFile(path.join(root, 'fake-cypress/package.json'), JSON.stringify({ name: 'cypress', version: '16.0.0', bin: { cypress: 'bin/cypress' } }));
+        await fs.writeFile(path.join(root, 'fake-cypress/package.json'), JSON.stringify({ name: 'cypress', version: '16.0.0', main: 'index.cjs', bin: { cypress: 'bin/cypress' } }));
         await fs.writeFile(path.join(root, 'fake-cypress/bin/cypress'), "console.log(JSON.stringify({args:process.argv.slice(2),value:process.env.EXAMPLE_SETTING}));setTimeout(()=>{},500);");
+        await fs.writeFile(path.join(root, 'fake-cypress/index.cjs'), "exports.cli={parseRunArguments:async args=>{if(args[0]!=='cypress'||args[1]!=='run')throw Error('Module parser prefix missing');return {args:args.slice(1)};}};\nexports.run=async options=>{\n    if(options.project!==process.cwd())throw Error('Module API project root missing');\n    const fs=require('node:fs'),path=require('node:path'),args=options.args;\n    console.log(JSON.stringify({args,value:process.env.EXAMPLE_SETTING}));\n    const specs=args[args.indexOf('--spec')+1].split(','),folder=process.env.SPEC_RUNNER_ARTIFACTS_DIR;\n    fs.mkdirSync(folder,{recursive:true});\n    const screenshot=path.join(folder,'screenshot.png');fs.writeFileSync(screenshot,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=','base64'));\n    await new Promise(resolve=>setTimeout(resolve,150));\n    return {totalTests:specs.length,totalPassed:specs.length,totalFailed:0,totalPending:0,totalSkipped:0,totalDuration:150,config:{env:{TOKEN:'raw_config_secret_do_not_store'}},runs:specs.map(spec=>({spec:{relative:spec},stats:{passes:1,failures:0,pending:0,skipped:0,wallClockDuration:150},tests:[{title:['Example','passes after retry'],state:'passed',attempts:[{state:'failed',wallClockDuration:100},{state:'passed',wallClockDuration:50}]}],screenshots:[{path:screenshot}],video:null}))};\n};\n");
         await fs.writeFile(path.join(root, 'cypress/e2e/example.cy.ts'), '');
+        await fs.writeFile(path.join(root, 'portable browser'), 'fixture browser');
         await fs.writeFile(path.join(root, 'cypress.config.ts'), "import {defineConfig} from 'cypress'; throw Error('Discovery must not execute config'); export default defineConfig({e2e:{specPattern:'cypress/e2e/**/*.cy.ts'}});");
         await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'example-consumer', private: true, devDependencies: { cypress: 'file:./fake-cypress', [ownPackage.name]: 'file:' + archive } }));
         await execute(process.execPath, installArguments(process.env.npm_execpath, process.env.npm_config_user_agent), root);
@@ -56,130 +58,11 @@ async function main() {
         config.profiles[0].env = { EXAMPLE_SETTING: '${EXAMPLE_LOCAL_VALUE}' };
         await fs.writeFile(configFile, JSON.stringify(config));
         await fs.writeFile(path.join(root, '.env'), 'EXAMPLE_LOCAL_VALUE=fixture-value');
-        const harness = path.join(root, 'desktop-check.cjs');
-        await fs.writeFile(harness, `
-            const { app, BrowserWindow, shell, dialog, nativeImage, clipboard } = require('electron');
-            const icon = nativeImage.createFromPath(${JSON.stringify(path.join(installed, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'))});
-            if (icon.isEmpty() || icon.getSize().width < 16) throw Error('Packaged application icon is missing or invalid');
-            const openedLogs = [], revealedLogs = [];
-            shell.showItemInFolder = file => { revealedLogs.push(file); };
-            shell.openPath = async file => { openedLogs.push(file); return openedLogs.length === 1 ? 'No default application is configured.' : ''; };
-            dialog.showSaveDialog = async () => { throw Error('The existing log should open without a save dialog'); };
-            const original = BrowserWindow.prototype.loadFile;
-            BrowserWindow.prototype.loadFile = async function(...args) {
-                const result = await original.apply(this,args);
-                const window = this;
-                setTimeout(async () => {
-                    try {
-                        const result = await window.webContents.executeJavaScript(\`(async()=>{
-                            const notificationState=await window.specRunner.notifications(false);
-                            if(notificationState.enabled) throw Error('Notifications were not disabled');
-                            const notificationGuard=await window.specRunner.testNotification().then(()=>null,error=>error.message);
-                            if(!notificationGuard) throw Error('Test notification bypassed the opt-in preference');
-                            const project=await window.specRunner.project();
-                            const unavailable = await window.specRunner.preview({specs:project.specs,profile:project.config.defaultProfile,browser:'chrome',headed:false}).then(()=>null,error=>error.message);
-                            if(!unavailable) throw Error('A disabled browser was accepted');
-                            const noLog = await window.specRunner.openLog('missing').then(()=>null,error=>error.message);
-                            if(!noLog) throw Error('A missing log was opened');
-                            const noLocation=await window.specRunner.openLogLocation('missing').then(()=>null,error=>error.message);
-                            if(!noLocation) throw Error('A missing log location was opened');
-                            const job=await window.specRunner.run({specs:project.specs,profile:project.config.defaultProfile,browser:'electron',headed:false});
-                            for(let index=0;index<300;index++){
-                                const state=await window.specRunner.state(job.id);
-                                if(state.status==='passed') {
-                                    const failure = await window.specRunner.openLog(job.id).then(()=>null,error=>error.message);
-                                    if(!failure || !failure.includes('No default application is configured.')) throw Error('Log open failure was hidden');
-                                    await window.specRunner.openLog(job.id);
-                                    await window.specRunner.openLogLocation(job.id);
-                                    await window.specRunner.closeRun(job.id);
-                                    if((await window.specRunner.runs()).length || (await window.specRunner.batches()).length) throw Error('Closing the final run left its row or group behind');
-                                    const fresh = await window.specRunner.project();
-                                    const expanded = { ...fresh.config, browsers: ['electron', 'chrome'], maxConcurrentRuns: 1, profiles: [...fresh.config.profiles, { id: 'second', name: 'Second environment', args: [], env: fresh.config.profiles[0].env }] };
-                                    await window.specRunner.saveConfig(expanded, fresh.configRevision);
-                                    const matrix = { specs: fresh.specs, profiles: [fresh.config.defaultProfile, 'second'], browsers: ['electron', 'chrome'], headed: false, isolateArtifacts: false };
-                                    const invalid = await window.specRunner.runMatrix({ ...matrix, profiles: [fresh.config.defaultProfile, 'missing'] }).then(()=>null,error=>error.message);
-                                    if(!invalid || (await window.specRunner.runs()).length) throw Error('Invalid matrix started a partial batch');
-                                    const batch = await window.specRunner.runMatrix(matrix);
-                                    if(batch.runs.length!==4 || batch.runs.filter(run=>run.status==='running').length!==1) throw Error('Matrix did not create four runs with the configured cap');
-                                    const first = batch.runs[0], cancelled = batch.runs[3];
-                                    const renamed = await window.specRunner.updateRun(first.id, { name: 'Checkout checks', notes: 'Compare browser results' });
-                                    if(renamed.name!=='Checkout checks' || renamed.browser!==first.browser || renamed.profileId!==first.profileId) throw Error('Renaming changed the target');
-                                    await window.specRunner.renameBatch(batch.batch.id, 'Cross-browser matrix');
-                                    await window.specRunner.stop(cancelled.id);
-                                    if((await window.specRunner.runs()).some(run=>run.id===cancelled.id)) throw Error('Cancelled queued run remains visible');
-                                    const states = async()=>Promise.all(batch.runs.filter(run=>run.id!==cancelled.id).map(run=>window.specRunner.state(run.id)));
-                                    let finished;
-                                    for(let attempt=0;attempt<400;attempt++) {
-                                        const current=await states();
-                                        if(current.every(run=>run.status==='passed')) { finished=current; break; }
-                                        if(current.some(run=>run.status==='failed')) throw Error(JSON.stringify(current));
-                                        await new Promise(resolve=>setTimeout(resolve,20));
-                                    }
-                                    if(!finished) throw Error('Matrix did not finish');
-                                    const group=(await window.specRunner.batches()).find(group=>group.id===batch.batch.id);
-                                    if(group.name!=='Cross-browser matrix' || Object.keys(group.statuses).length!==4 || Object.values(group.statuses).filter(status=>status==='cancelled').length!==1) throw Error('Matrix summary lost cancelled results');
-                                    await window.specRunner.copyOutput(first.id);
-                                    await window.specRunner.closeRun(first.id);
-                                    const repeated=await window.specRunner.rerun(finished[1].id);
-                                    if(repeated.runs.length!==1 || repeated.runs[0].browser!==finished[1].browser) throw Error('Rerun changed its target');
-                                    for(let attempt=0;attempt<300;attempt++) {
-                                        const repeatState=await window.specRunner.state(repeated.runs[0].id);
-                                        if(repeatState.status==='passed') break;
-                                        if(repeatState.status==='failed' || attempt===299) throw Error('Rerun did not pass');
-                                        await new Promise(resolve=>setTimeout(resolve,20));
-                                    }
-                                    await window.specRunner.closeBatch(repeated.batch.id);
-                                    await window.specRunner.closeBatch(batch.batch.id);
-                                    return { ...state, matrix: finished };
-                                }
-                                if(state.status==='failed') throw Error(state.output);
-                                await new Promise(resolve=>setTimeout(resolve,20));
-                            }
-                            throw Error('Run did not complete');
-                        })()\`);
-                        if(app.getName()!=='Cypress Spec Runner') throw Error('Native application name is not friendly');
-                        if(revealedLogs.length!==1||revealedLogs[0]!==result.logPath) throw Error('Reveal log did not use the saved run log');
-                        if(openedLogs.length!==2 || openedLogs.some(file=>file!==result.logPath)) throw Error('Open log did not use the saved run log');
-                        if((await clipboard.readText()).replace(/\\r\\n/g,'\\n')!==result.matrix[0].output.replace(/\\r\\n/g,'\\n')) throw Error('Copy output did not copy the full selected log');
-                        await window.webContents.executeJavaScript("globalThis.smokeSpecEvents=[];globalThis.stopSpecListener=window.specRunner.onSpecChanges(value=>globalThis.smokeSpecEvents.push(value));void 0;");
-                        for(let index=0;index<6;index++) await require('node:fs/promises').writeFile(require('node:path').join(${JSON.stringify(root)}, 'cypress/e2e/split-'+index+'.cy.ts'), '');
-                        let changed=false;
-                        for(let index=0;index<150;index++) {
-                            changed=await window.webContents.executeJavaScript("globalThis.smokeSpecEvents.includes(true)&&!!document.querySelector('[aria-label=\\\"Spec changes detected\\\"]')");
-                            if(changed) break;
-                            await new Promise(resolve=>setTimeout(resolve,100));
-                        }
-                        if(!changed) throw Error('A new spec did not reach the renderer refresh indicator');
-                        await window.webContents.executeJavaScript(\`(async()=>{
-                            const project=await window.specRunner.refresh();
-                            if(project.specs.length!==7) throw Error('Refresh did not discover new specs');
-                            const plan={specs:project.specs,profiles:[project.config.defaultProfile,'second'],browsers:['electron','chrome'],headed:false,executionMode:'split'};
-                            const preview=await window.specRunner.previewMatrix(plan);
-                            if(preview.split(String.fromCharCode(10)).length!==4) throw Error('Split preview did not include four workers');
-                            const split=await window.specRunner.runMatrix(plan);
-                            const assigned=split.runs.flatMap(run=>run.specs);
-                            if(split.runs.length!==4||new Set(assigned).size!==7||assigned.length!==7||split.batch.specCount!==7||split.batch.executionMode!=='split') throw Error('Split matrix duplicated or dropped specs');
-                            for(let attempt=0;attempt<400;attempt++) {
-                                const runs=await Promise.all(split.runs.map(run=>window.specRunner.state(run.id)));
-                                if(runs.every(run=>run.status==='passed')) {
-                                    for(const run of runs){const args=JSON.parse(run.output).args;if(args[args.indexOf('--spec')+1]!==run.specs.join(','))throw Error('Split execution differs from its plan');}
-                                    await window.specRunner.closeBatch(split.batch.id);globalThis.stopSpecListener();return;
-                                }
-                                if(runs.some(run=>run.status==='failed')||attempt===399) throw Error('Split matrix did not pass');
-                                await new Promise(resolve=>setTimeout(resolve,20));
-                            }
-                        })()\`);
-                        if(await window.webContents.executeJavaScript("!!document.querySelector('[aria-label=\\\"Spec changes detected\\\"]')")) throw Error('Refresh did not clear the changed indicator');
-                        console.log('PACKAGED_RUN:' + JSON.stringify(result)); app.exit(0);
-                    } catch(error) { console.error(error); app.exit(1); }
-                }, 30);
-                return result;
-            };
-            require(${JSON.stringify(path.join(installed, 'out/electron/main.js'))});
-        `);
+        const harness = path.join(root, 'package-main.cjs');
+        for (const file of ['package-main.cjs', 'package-run-check.cjs', 'package-split-check.cjs', 'package-history-check.cjs']) await fs.copyFile(path.join(__dirname, '../tests/fixtures', file), path.join(root, file));
         const requireFromPackage = require('node:module').createRequire(path.join(installed, 'package.json'));
         const electron = requireFromPackage('electron');
-        const env = { ...process.env, SPEC_RUNNER_PROJECT: root, SPEC_RUNNER_NODE: process.execPath };
+        const env = { ...process.env, SPEC_RUNNER_PROJECT: root, SPEC_RUNNER_NODE: process.execPath, SPEC_RUNNER_PACKAGE: installed };
         delete env.ELECTRON_RUN_AS_NODE;
         const output = await execute(electron, [...(process.platform === 'linux' ? ['--no-sandbox', '--ozone-platform=headless'] : []), '--disable-gpu', harness], root, env);
         const line = output.split('\n').find(line => line.startsWith('PACKAGED_RUN:'));
@@ -202,7 +85,10 @@ async function main() {
             assert.ok(args.includes('--posix-exit-codes'));
             assert.equal(args[args.indexOf('--browser') + 1], run.browser);
         }
-        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs. A split matrix executed seven specs exactly once across four workers, and file changes reached the refresh indicator.');
+        assert.equal(state.results.total, 1); assert.equal(state.results.specs[0].tests[0].attempts, 2);
+        const reopened = await execute(electron, [...(process.platform === 'linux' ? ['--no-sandbox', '--ozone-platform=headless'] : []), '--disable-gpu', harness], root, { ...env, SPEC_RUNNER_SMOKE_PHASE: 'history' });
+        assert.match(reopened, /HISTORY_REOPENED:/);
+        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs. A split matrix executed seven specs exactly once across four workers, and file changes reached the refresh indicator. Module API results, custom browser channels/local bindings, local/shared presets, owned artifact actions and history across an app restart passed.');
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 }
 module.exports = { archiveFilename, installArguments };

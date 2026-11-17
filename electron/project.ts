@@ -3,6 +3,8 @@ import { createRequire } from 'node:module';
 import { access, mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { glob } from 'glob';
+import { loadLocal } from './local-state';
+import { validatePresets } from '../shared/presets';
 import { specDiscovery } from './discovery';
 import type { SpecDiscovery } from '../shared/types';
 import { availableBrowsers, browsers, type Category, type CategoryFile, type Project, type ProjectConfig, type RunOptions, type SaveResult } from '../shared/types';
@@ -39,8 +41,15 @@ export function validateConfig(value: unknown): ProjectConfig {
         if (!Array.isArray(config[field]) || (field === 'specPattern' && !config[field].length)
             || config[field].some(pattern => !relativePath(pattern) || pattern.startsWith('!'))) throw Error(`${field} must contain project-relative glob patterns. Use exclusions to omit files.`);
     }
+    const custom = config.customBrowsers ?? [];
+    const browserIds = new Set<string>(browsers), browserNames = new Set<string>(browsers);
+    if (!Array.isArray(custom) || custom.length > 50) throw Error('Keep at most 50 custom browsers.');
+    for (const browser of custom) {
+        if (!browser || typeof browser.id !== 'string' || !idPattern.test(browser.id) || browserIds.has(browser.id) || typeof browser.name !== 'string' || !browser.name.trim() || browser.name.length > 100 || browserNames.has(browser.name.trim().toLowerCase()) || /[\x00\r\n]/.test(browser.name) || (browser.channel !== undefined && (typeof browser.channel !== 'string' || !/^[a-z][a-z0-9-]*(?::[a-z][a-z0-9-]*)?$/i.test(browser.channel)))) throw Error('Custom browsers need unique IDs, names, and a Cypress browser/channel name or a local path binding.');
+        browserIds.add(browser.id); browserNames.add(browser.name.trim().toLowerCase());
+    }
     if (config.browsers !== undefined && (!Array.isArray(config.browsers) || !config.browsers.length
-        || config.browsers.some(browser => !browsers.includes(browser)) || new Set(config.browsers).size !== config.browsers.length)) throw Error('Choose at least one supported browser, without duplicates.');
+        || config.browsers.some(browser => !browserIds.has(browser)) || new Set(config.browsers).size !== config.browsers.length)) throw Error('Choose at least one supported browser, without duplicates.');
     const validLimit = (value: unknown) => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 8;
     if (config.maxConcurrentRuns !== undefined && !validLimit(config.maxConcurrentRuns)) throw Error('The overall concurrency limit must be an integer from 1 to 8.');
     const groups = config.concurrencyGroups === undefined ? [] : config.concurrencyGroups;
@@ -67,7 +76,7 @@ export function validateConfig(value: unknown): ProjectConfig {
         if (profile.baseUrl !== undefined && typeof profile.baseUrl !== 'string') throw Error('Base URL must be text.');
     }
     if (typeof config.defaultProfile !== 'string' || !ids.has(config.defaultProfile)) throw Error('Choose an existing default profile.');
-    return { ...config, maxConcurrentRuns: config.maxConcurrentRuns ?? 2, concurrencyGroups: groups.map(group => ({ ...group, name: group.name.trim() })), name: config.name.trim(), browsers: [...availableBrowsers(config)], profiles: config.profiles.map(profile => ({ ...profile, maxConcurrentRuns: profile.maxConcurrentRuns ?? 1, name: profile.name.trim() })) };
+    return { ...config, maxConcurrentRuns: config.maxConcurrentRuns ?? 2, concurrencyGroups: groups.map(group => ({ ...group, name: group.name.trim() })), name: config.name.trim(), ...(custom.length ? { customBrowsers: custom.map(browser => ({ id: browser.id, name: browser.name.trim(), ...(browser.channel !== undefined ? { channel: browser.channel } : {}) })) } : {}), ...(config.presets !== undefined ? { presets: validatePresets(config.presets) } : {}), browsers: [...availableBrowsers(config)], profiles: config.profiles.map(profile => ({ ...profile, maxConcurrentRuns: profile.maxConcurrentRuns ?? 1, name: profile.name.trim() })) };
 }
 export function validateCategories(value: unknown): CategoryFile {
     const file = value as CategoryFile;
@@ -123,7 +132,7 @@ export async function loadProject(directory: string): Promise<Project> {
             catch { return [spec, 0]; } // Missing timestamps sort last; a disappearing file must not prevent refresh.
         })));
     }
-    return { root, config, configRevision: stored?.revision ?? 'missing', initialized: stored !== null,
+    return { root, config, local: await loadLocal(root), configRevision: stored?.revision ?? 'missing', initialized: stored !== null,
         categories: categories ? validateCategories(categories.value).categories : [], revision: categories?.revision ?? 'missing',
         cypressVersion: createRequire(path.join(root, 'package.json'))('cypress/package.json').version,
         specs, specModifiedTimes: Object.fromEntries(modified), discovery };
@@ -205,14 +214,19 @@ export async function initializeProject(root: string, chosenConfig?: ProjectConf
     if (missing.length) { await writeFile(path.join(root, '.gitignore'), ignore + (ignore.endsWith('\n') || !ignore ? '' : '\n') + missing.join('\n') + '\n'); changedFiles.push('.gitignore'); }
     return { project: await loadProject(root), changedFiles };
 }
-export async function validateRun(root: string, value: unknown, snapshot?: ProjectConfig, discovered?: string[]): Promise<RunOptions> {
+export async function validateRun(root: string, value: unknown, snapshot?: ProjectConfig, discovered?: string[], trustedTarget?: string): Promise<RunOptions> {
     const options = value as RunOptions;
     const project = snapshot ? { config: validateConfig(snapshot), specs: discovered ?? await discoverSpecs(root, snapshot) } : await loadProject(root);
     if (options?.isolateArtifacts !== undefined && typeof options.isolateArtifacts !== 'boolean') throw Error('Invalid artifact folder preference.');
     if (!options || !Array.isArray(options.specs) || !options.specs.length || options.specs.some(spec => !literalSpec(spec))) throw Error('Select at least one valid spec file.');
     if (!project.config.profiles.some(profile => profile.id === options.profile) || !availableBrowsers(project.config).includes(options.browser) || typeof options.headed !== 'boolean') throw Error('Invalid profile, browser, or run options.');
     if (options.specs.some(spec => !project.specs.includes(spec))) throw Error('A selected spec no longer exists or does not match the configured patterns. Refresh your specs.');
-    return { ...options, specs: [...new Set(options.specs)].sort() };
+    const custom = project.config.customBrowsers?.find(browser => browser.id === options.browser);
+    const paths = custom && custom.channel === undefined ? (await loadLocal(root)).browserPaths : {};
+    const browserTarget = trustedTarget ?? (custom ? custom.channel ?? (Object.hasOwn(paths, custom.id) ? paths[custom.id] : undefined) : options.browser);
+    if (!browserTarget) throw Error(`Set a local executable path for ${custom?.name ?? options.browser} in Settings before starting.`);
+    if (custom && !custom.channel) { if (!path.isAbsolute(browserTarget) || !await stat(browserTarget).then(info => info.isFile() || (process.platform === 'darwin' && browserTarget.endsWith('.app') && info.isDirectory())).catch(() => false)) throw Error('The custom browser executable does not exist. Update its local path in Settings.'); }
+    return { ...options, browserTarget, specs: [...new Set(options.specs)].sort() };
 }
 function configValues(value: string): Record<string, unknown> {
     if (value.trim().startsWith('{')) {
@@ -262,7 +276,7 @@ function argumentsFor(options: RunOptions, config: ProjectConfig, expand: (value
     const version = /^(\d+)\.(\d+)\./.exec(cypressVersion ?? '');
     if (version && (Number(version[1]) > 15 || (Number(version[1]) === 15 && Number(version[2]) >= 4)) && !args.some(arg => arg === '--posix-exit-codes' || arg.startsWith('--posix-exit-codes='))) args.push('--posix-exit-codes');
     return ['run', '--e2e', ...(config.configFile ? ['--config-file', config.configFile] : []), ...args,
-        ...(Object.keys(overrides).length ? ['--config', JSON.stringify(overrides)] : []), '--browser', options.browser,
+        ...(Object.keys(overrides).length ? ['--config', JSON.stringify(overrides)] : []), '--browser', options.browserTarget ?? config.customBrowsers?.find(browser => browser.id === options.browser)?.channel ?? options.browser,
         ...(options.headed ? ['--headed'] : []), '--spec', options.specs.join(',')];
 }
 export function runArguments(options: RunOptions, config: ProjectConfig, environment: NodeJS.ProcessEnv = process.env, artifactDirectory?: string, cypressVersion?: string): string[] {

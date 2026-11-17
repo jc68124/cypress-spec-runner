@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import type { NotificationStatus, Project, ProjectConfig, RunProfile, RunOptions } from '../shared/types';
-import { availableBrowsers, browsers } from '../shared/types';
+import type { NotificationStatus, Project, ProjectConfig, RunProfile, RunOptions, LocalState } from '../shared/types';
+import { availableBrowsers, browserName } from '../shared/types';
 import { Button, Help } from './ui';
+import { BrowserSettings, LocalBrowsers } from './BrowserSettings';
 import { JsonEditor } from './JsonEditor';
 import { parseEditorJson, type JsonKind } from '../shared/json-editor';
 
-export function Settings({ project, disabled, onSave, browser, setBrowser, follow, setFollow, notify, setNotify, notificationState, testNotification }: {
+export function Settings({ project, disabled, onSave, browser, setBrowser, follow, setFollow, notify, setNotify, notificationState, testNotification, saveLocal }: {
+    saveLocal: (state: LocalState) => Promise<void>;
     notify: boolean; setNotify: (value: boolean) => void; notificationState: NotificationStatus; testNotification: () => Promise<void>;
     project: Project; disabled: boolean; onSave: (config: ProjectConfig) => Promise<void>;
     browser: RunOptions['browser']; setBrowser: (browser: RunOptions['browser']) => void; follow: boolean; setFollow: (follow: boolean) => void;
@@ -62,7 +64,7 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
         <section className="settings-section space-y-4" aria-labelledby="browsers-title">
             <h3 id="browsers-title" className="font-semibold text-white">Available browsers <Help label="About available browsers">Choose which browsers people can select for this project. Browsers must be installed locally; this does not install or detect them. Save and commit the project configuration to share this list.</Help></h3>
             <p className="field-description">Enable at least one browser. Only enabled browsers appear in run controls and personal preferences.</p>
-            <div className="flex flex-wrap gap-x-6 gap-y-3">{browsers.map(value => <label key={value} className="flex items-center gap-3 text-sm"><input type="checkbox" aria-label={`Enable ${value}`} checked={availableBrowsers(draft).includes(value)} disabled={busy || (availableBrowsers(draft).length === 1 && availableBrowsers(draft).includes(value))} onChange={event => setDraft(current => ({ ...current, browsers: event.target.checked ? browsers.filter(browser => browser === value || availableBrowsers(current).includes(browser)) : availableBrowsers(current).filter(browser => browser !== value) }))} />{value}</label>)}</div>
+            <BrowserSettings draft={draft} setDraft={setDraft} disabled={busy} />
         </section>
         <section className="settings-section space-y-4" aria-labelledby="scheduling-title">
             <h3 id="scheduling-title" className="font-semibold text-white">Run scheduling <Help label="About concurrency limits">Runs start only when the overall, profile, and shared environment group limits all allow it. Other profiles can start while a queued run waits. These limits apply to this app instance.</Help></h3>
@@ -97,8 +99,9 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
         <div className="flex flex-wrap items-center justify-between gap-4"><p className="max-w-xl text-xs leading-5 text-zinc-400">Save writes shared project files. Commit the files listed in the save reminder to share your changes.</p><Button kind="primary" disabled={busy} onClick={() => void save()}>{saving ? 'Saving…' : project.initialized ? 'Save project settings' : 'Save and finish setup'}</Button></div>
         <section className="settings-section space-y-4"><h3 className="font-semibold text-white">Personal preferences <span className="ml-2 text-xs font-normal text-zinc-400">Saved locally</span></h3><p className="field-description">These apply immediately for this checkout and do not need committing.</p>
-            <div><label htmlFor="preferred-browser" className="field-label">Preferred browser</label><select id="preferred-browser" value={browser} onChange={event => setBrowser(event.target.value as RunOptions['browser'])}>{availableBrowsers(project.config).map(value => <option key={value} value={value}>{value}</option>)}</select></div>
+            <div><label htmlFor="preferred-browser" className="field-label">Preferred browser</label><select id="preferred-browser" value={browser} onChange={event => setBrowser(event.target.value as RunOptions['browser'])}>{availableBrowsers(project.config).map(value => <option key={value} value={value}>{browserName(project.config, value)}</option>)}</select></div>
             <div className="space-y-2"><label className="flex items-center gap-3 text-sm"><input type="checkbox" aria-label="Notify when a run group finishes" checked={notify} disabled={!notificationState.supported} onChange={event => setNotify(event.target.checked)} />Notify when a run group finishes</label><p className="field-description">One desktop summary per finished group, including failures. This preference stays on this computer.</p>{!notificationState.supported && <p className="field-description">Desktop notifications are unavailable in this session.</p>}{notificationState.error && <p role="status" className="text-xs text-amber-200">{notificationState.error}</p>}<Button small disabled={!notificationState.enabled} onClick={() => void testNotification()}>Send test notification</Button></div>
+            <LocalBrowsers project={project} save={saveLocal} />
             <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} />Follow new output automatically</label>
         </section>
     </div>;

@@ -1,5 +1,9 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, shell, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
+import { stat, realpath } from 'node:fs/promises';
+import { saveLocal } from './local-state';
+import { RunHistory } from './history';
+import { resultArtifacts } from '../shared/results';
 import { mkdir } from 'node:fs/promises';
 import { registerNotificationIdentity } from './notification-identity';
 import { BatchNotifier, type CompletionNotice } from './batch-notifier';
@@ -9,7 +13,7 @@ import { commandPreview, findProject, initializeProject, loadProject, saveCatego
 import { SpecChanges } from './spec-changes';
 import { RunManager } from './run-manager';
 import type { Category, ProjectConfig, RunOptions, SaveResult } from '../shared/types';
-import { matrixRuns, validateMatrixTargets } from '../shared/runs';
+import { matrixRuns, validateMatrixTargets, validateRunDetails } from '../shared/runs';
 import type { MatrixOptions, RunDetails } from '../shared/types';
 
 const appName = 'Cypress Spec Runner';
@@ -28,6 +32,7 @@ let confirmingClose = false;
 const html = realpathSync.native(path.resolve(__dirname, '../../dist/index.html'));
 const icon = path.resolve(__dirname, '../../assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
 let runs: RunManager;
+let history: RunHistory;
 let notificationError: string | undefined;
 let notificationGeneration = 0;
 const notifications = new BatchNotifier(showNotice, () => notificationFailed());
@@ -95,10 +100,28 @@ app.whenReady().then(async () => {
     app.once('will-quit', stopWatching);
     const readProject = async () => { const current = await loadProject(root); specChanges.accept(current); return current; };
     const updated = async (action: () => Promise<SaveResult>) => { const result = await action(); specChanges.accept(result.project); return result; };
-    runs = new RunManager(root, job => { if (window && !window.isDestroyed()) window.webContents.send('run:changed', job); }, batch => { notifications.observe(batch); if (window && !window.isDestroyed()) window.webContents.send('batch:changed', batch); });
+    history = new RunHistory(root);
+    runs = new RunManager(root, job => { history.observe(job, runs?.batches().find(batch => batch.id === job.batchId)); if (window && !window.isDestroyed()) window.webContents.send('run:changed', job); }, batch => { notifications.observe(batch); for (const job of runs?.list() ?? []) if (job.batchId === batch.id) history.observe(job, batch); if (window && !window.isDestroyed()) window.webContents.send('batch:changed', batch); });
     handle('notifications:configure', configureNotifications);
     handle('notifications:test', () => { if (!notifications.enabled) throw Error('Enable desktop notifications first.'); showNotice({ batchId: '', title: appName, body: 'You will be notified when a run group finishes.' }); });
     handle('project:get', readProject);
+    handle('local:save', async (state: import('../shared/types').LocalState) => { if (saving) throw Error('Wait for the current save to finish.'); saving = true; try { return await saveLocal(root, state); } finally { saving = false; } });
+    handle('browser:choose', async () => { const result = await dialog.showOpenDialog(window, { title: 'Choose browser executable', properties: process.platform === 'darwin' ? ['openFile', 'openDirectory'] : ['openFile'] }); return result.canceled ? null : result.filePaths[0] ?? null; });
+    handle('history:list', () => history.list());
+    handle('history:detail', (id: string) => history.detail(id));
+    handle('history:forget', (id?: string) => history.forget(id));
+    handle('history:rerun', async (id: string) => { if (saving) throw Error('Wait for the save to finish.'); const job = await history.detail(id); const details = validateRunDetails({ name: job.name, notes: job.notes }); const result = await runs.enqueueMatrix({ specs: job.specs, profiles: [job.profileId], browsers: [job.browser], headed: job.headed, isolateArtifacts: job.isolateArtifacts }); result.runs = result.runs.map(run => runs.update(run.id, details)); result.batch = runs.renameBatch(result.batch.id, `${job.name} (rerun)`.slice(0, 100)); return result; });
+    handle('history:log', async (id: string, location = false) => {
+        const job = await history.detail(id); if (!job.logPath || job.logError) throw Error(job.logError ?? 'This run has no saved log.');
+        const actual = await realpath(job.logPath); if (!actual.startsWith(await realpath(path.join(root, 'spec-runner-logs', id)) + path.sep)) throw Error('The saved log is outside its run folder.');
+        if (location) shell.showItemInFolder(actual); else { const error = await shell.openPath(actual); if (error) throw Error(error); }
+    });
+    handle('run:artifact', async (id: string, filename: string, historical = false) => {
+        const job = historical ? await history.detail(id) : runs.get(id);
+        if (!resultArtifacts(job.results).includes(filename) || !path.isAbsolute(filename) || !/\.(png|jpe?g|webp|gif|mp4|webm)$/i.test(filename) || !(await stat(filename)).isFile()) throw Error('This artifact is unavailable.');
+        const actual = await realpath(filename); if (!/\.(png|jpe?g|webp|gif|mp4|webm)$/i.test(actual)) throw Error('This artifact is not an image or video.');
+        const error = await shell.openPath(actual); if (error) throw Error(error);
+    });
     handle('project:refresh', readProject);
     handle('project:initialize', (config?: ProjectConfig) => save(() => updated(() => initializeProject(root, config))));
     handle('config:save', (config: ProjectConfig, revision: string) => save(() => updated(() => saveConfig(root, config, revision))));
@@ -119,7 +142,7 @@ app.whenReady().then(async () => {
     handle('batch:rename', (id: string, name: string) => runs.renameBatch(id, name));
     handle('batch:close', (id: string) => runs.closeBatch(id));
     handle('run:stop', (id: string) => runs.stop(id));
-    handle('run:close', (id: string) => runs.close(id));
+    handle('run:close', async (id: string) => { await history.flush(); runs.close(id); });
     handle('run:list', () => runs.list());
     handle('run:copy-output', async (id: string) => { await clipboard.writeText(await runs.copyText(id)); });
     handle('run:state', (id: string) => runs.get(id));
@@ -144,13 +167,13 @@ app.whenReady().then(async () => {
 }).catch(error => { dialog.showErrorBox('Unable to open Cypress Spec Runner', String(error)); app.exit(1); });
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
-    if (!runs?.active || quitting) return;
+    if (quitting) return;
     event.preventDefault();
     if (confirmingClose) return;
     confirmingClose = true;
     void (async () => {
-        const result = await dialog.showMessageBox(window, { title: appName, type: 'question', buttons: ['Keep running', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'Cypress runs are still active or queued.', detail: 'Closing cancels queued runs and stops all running Cypress processes.' });
+        const result = runs?.active ? await dialog.showMessageBox(window, { title: appName, type: 'question', buttons: ['Keep running', 'Stop and close'], defaultId: 0, cancelId: 0, message: 'Cypress runs are still active or queued.', detail: 'Closing cancels queued runs and stops all running Cypress processes.' }) : { response: 1 };
         if (result.response !== 1) { confirmingClose = false; return; }
-        try { notifications.suspended = true; await runs.stopAll(); quitting = true; app.quit(); } catch (error) { notifications.suspended = false; dialog.showErrorBox('Could not stop all runs', String(error)); confirmingClose = false; }
+        try { notifications.suspended = true; if (runs?.active) await runs.stopAll(); await history?.flush(); quitting = true; app.quit(); } catch (error) { notifications.suspended = false; dialog.showErrorBox('Could not stop all runs', String(error)); confirmingClose = false; }
     })();
 });
