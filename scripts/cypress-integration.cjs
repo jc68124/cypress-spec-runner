@@ -19,7 +19,7 @@ async function main() {
         await execute(process.execPath, [path.join(root, 'node_modules/cypress/bin/cypress'), 'install'], root);
         await fs.mkdir(path.join(root, 'cypress/e2e'), { recursive: true });
         const specs = ['cypress/e2e/01-pass.cy.js', 'cypress/e2e/02-fail.cy.js'];
-        await fs.writeFile(path.join(root, specs[0]), "it('passes with the original setup configuration',()=>{expect(Cypress.env('FROM_SETUP')).to.eq('kept');expect(Cypress.env('FROM_IMPORT')).to.eq('kept');});");
+        await fs.writeFile(path.join(root, specs[0]), "it('passes with the original setup configuration',()=>{cy.env(['FROM_SETUP','FROM_IMPORT']).then(values=>{expect(values.FROM_SETUP).to.eq('kept');expect(values.FROM_IMPORT).to.eq('kept');});});");
         await fs.writeFile(path.join(root, specs[1]), "it('fails after the first spec completes',()=>{cy.wait(1000).then(()=>expect(false).to.eq(true));});");
         await fs.writeFile(path.join(root, 'helper.cjs'), "module.exports='kept';");
         for (const [filename, esm, ts] of [['cypress.config.cjs', false, false], ['cypress.config.ts', false, true], ['cypress.config.mjs', true, false], ['cypress.config.ts', true, true]]) {
@@ -34,7 +34,8 @@ async function main() {
             const limit = Date.now() + 90000;
             while (runner.active && Date.now() < limit) await new Promise(resolve => setTimeout(resolve, 20));
             assert.equal(runner.active, false, 'Native Cypress did not finish');
-            assert.equal(runner.state.status, 'failed', runner.state.output); assert.equal(runner.state.results?.failed, 1, runner.state.output);
+            const diagnostic = `${runner.state.output}\n${JSON.stringify(runner.state.results ?? runner.state.resultsError)}`;
+            assert.equal(runner.state.status, 'failed', diagnostic); assert.equal(runner.state.results?.failed, 1, diagnostic);
             assert.equal(observed, true, 'No progress arrived before final results');
             assert.equal(runner.state.progress.completed, 2); assert.equal(runner.state.progress.total, 2);
             assert.deepEqual(requireFailedSpecs(runner.state.results, specs), [specs[1]]);
