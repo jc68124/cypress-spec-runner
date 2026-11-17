@@ -59,7 +59,8 @@ test('structured results preserve final outcomes, retries and artifacts without 
     assert.equal(huge.truncated, true); assert.equal(huge.failed, 1); assert.ok(Buffer.byteLength(JSON.stringify(huge)) < 5 * 1024 * 1024);
 });
 test('the Cypress module adapter preserves parsed arguments and returns accurate failures rather than interpreting exit codes', async t => {
-    const root = await fixture(t), runner = new Runner(() => {}); t.after(() => runner.stop());
+    const runner = new Runner(() => {}); t.after(() => runner.stop());
+    const root = await fixture(t);
     await moduleFixture(root, raw);
     const config = await defaults(root); config.profiles[0].args = ['--reporter', 'custom-reporter', '--reporter-options', 'setting=kept'];
     await runner.run(root, { specs: [spec], profile: 'default', browser: 'electron', headed: false }, config);
@@ -74,10 +75,11 @@ test('the Cypress module adapter preserves parsed arguments and returns accurate
     assert.equal(runner.state.status, 'failed'); assert.equal(runner.state.results, undefined); assert.match(runner.state.resultsError!, /Configuration could not run/);
 });
 test('recent history survives reopening and closing groups, preserves results and excludes output, commands and environment values', async t => {
-    const root = await fixture(t), history = new RunHistory(root); let manager: RunManager;
+    let manager: RunManager | undefined;
+    t.after(() => manager?.stopAll() ?? Promise.resolve());
+    const root = await fixture(t), history = new RunHistory(root);
     await moduleFixture(root, raw);
-    manager = new RunManager(root, job => history.observe(job, manager.batches().find(batch => batch.id === job.batchId)));
-    t.after(() => manager.stopAll());
+    manager = new RunManager(root, job => history.observe(job, manager!.batches().find(batch => batch.id === job.batchId)));
     const job = await manager.enqueue({ specs: [spec], profile: 'default', browser: 'electron', headed: false });
     await until(() => !manager.active); await history.flush();
     manager.update(job.id, { name: 'Investigate checkout', notes: 'Saved note' }); await history.flush(); manager.close(job.id);
@@ -103,6 +105,10 @@ test('local writes reject symlink escapes and history errors do not change a run
 });
 
 test('queued custom-browser paths stay captured while reruns resolve the current local binding', async t => {
+    // Hooks run in registration order. Stop children before fixture() removes
+    // their working directory, which remains locked while they run on Windows.
+    let manager: RunManager | undefined;
+    t.after(() => manager?.stopAll() ?? Promise.resolve());
     const root = await fixture(t), config = await defaults(root);
     config.profiles[0].name = 'P'.repeat(100); config.customBrowsers = [{ id: 'portable', name: 'B'.repeat(100) }]; config.browsers = ['portable'];
     await saveConfig(root, config, 'missing');
@@ -110,7 +116,7 @@ test('queued custom-browser paths stay captured while reruns resolve the current
     await writeFile(firstPath, ''); await writeFile(nextPath, '');
     await saveLocal(root, { ...await loadLocal(root), browserPaths: { portable: firstPath } });
     await writeFile(path.join(root, 'node_modules/cypress/bin/cypress'), "console.log(JSON.stringify(process.argv.slice(2)));setInterval(()=>{},1000);");
-    const manager = new RunManager(root, () => {}); t.after(() => manager.stopAll());
+    manager = new RunManager(root, () => {});
     const options = { specs: [spec], profile: 'default', browser: 'portable', headed: false };
     const first = await manager.enqueue(options), queued = await manager.enqueue(options);
     assert.equal(first.name.length, 100); manager.update(first.id, { name: first.name, notes: '' });
@@ -123,11 +129,13 @@ test('queued custom-browser paths stay captured while reruns resolve the current
     assert.ok(JSON.parse(manager.get(repeated.runs[0].id).output).includes(nextPath));
 });
 test('history retains 100 summaries, tolerates save failures and clearing prevents open runs from reappearing on edits', async t => {
-    const root = await fixture(t), history = new RunHistory(root); let manager: RunManager;
+    let manager: RunManager | undefined;
+    t.after(() => manager?.stopAll() ?? Promise.resolve());
+    const root = await fixture(t), history = new RunHistory(root);
     await moduleFixture(root, { ...raw, totalFailed: 0, totalPassed: 2 });
     await mkdir(path.join(root, 'spec-runner-logs'), { recursive: true });
     await writeFile(path.join(root, 'spec-runner-logs/history.json'), 'invalid');
-    manager = new RunManager(root, job => history.observe(job)); t.after(() => manager.stopAll());
+    manager = new RunManager(root, job => history.observe(job));
     const job = await manager.enqueue({ specs: [spec], profile: 'default', browser: 'electron', headed: false });
     await until(() => !manager.active); await history.flush();
     assert.equal(manager.get(job.id).status, 'passed'); assert.ok((await history.list()).error);

@@ -30,6 +30,7 @@ jobs:
           fi
 
   validate:
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -44,6 +45,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm build
       - run: pnpm test
+        timeout-minutes: 3
       - run: npm pack --ignore-scripts
       - run: npm run smoke
       - run: pnpm run smoke
