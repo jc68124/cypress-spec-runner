@@ -1,5 +1,6 @@
 const { contextBridge } = require('electron');
 let revision = 0, callback = () => {}, sequence = 0;
+let specCallback = () => {};
 let jobs = [], groups = [], groupSequence = 0, batchCallback = () => {};
 const specs = ['cypress/e2e/account/Sign in.cy.ts', 'cypress/e2e/account/Sign out.cy.ts', 'cypress/e2e/catalog/Search.cy.ts'];
 let project = { root: '/example-project', initialized: false, configRevision: 'missing', revision: 'missing', specs, specModifiedTimes: { [specs[0]]: 2000, [specs[1]]: 3000, [specs[2]]: 1000 }, categories: [], config: {
@@ -15,15 +16,18 @@ function emit(job) {
 function remove(job, cleanup = true) { jobs = jobs.filter(item => item.id !== job.id); callback({ ...job, removed: true, revision: job.revision + 1 }); if(cleanup&&!jobs.some(item=>item.batchId===job.batchId)){const batch=groups.find(item=>item.id===job.batchId);groups=groups.filter(item=>item.id!==job.batchId);batchCallback({...batch,removed:true,revision:batch.revision+1});} }
 function runMatrix(options) {
     const batch = { id: 'batch-' + (++groupSequence), revision: 0, name: (options.profiles.length * options.browsers.length > 1 ? 'Matrix #' : 'Run #') + groupSequence,
-        createdAt: Date.now(), profiles: options.profiles.map(id => ({ id, name: project.config.profiles.find(profile => profile.id === id).name })), browsers: [...options.browsers], specCount: options.specs.length, statuses: {}, targets: [] };
-    const entries = options.profiles.flatMap(profile => options.browsers.map(browser => {
+        createdAt: Date.now(), profiles: options.profiles.map(id => ({ id, name: project.config.profiles.find(profile => profile.id === id).name })), browsers: [...options.browsers], specCount: options.specs.length, executionMode: options.executionMode, statuses: {}, targets: [] };
+    const specs = [...new Set(options.specs)].sort();
+    const pairs = options.executionMode === 'split' ? options.browsers.flatMap(browser=>options.profiles.map(profile=>({profile,browser}))).slice(0,specs.length) : options.profiles.flatMap(profile=>options.browsers.map(browser=>({profile,browser})));
+    const entries = pairs.map(({profile,browser},pairIndex) => {
+        const assigned = options.executionMode === 'split' ? specs.filter((_,index)=>index%pairs.length===pairIndex) : specs;
         const number = ++sequence, id = 'run-' + number, profileName = project.config.profiles.find(item => item.id === profile).name;
-        const job = { ...options, profile, browser, specs: [...options.specs], id, number, revision: 0, batchId: batch.id, name: profileName + ' · ' + browser, notes: '', profileId: profile, profileName,
+        const job = { ...options, profile, browser, specs: assigned, id, number, revision: 0, batchId: batch.id, name: profileName + ' · ' + browser, notes: '', profileId: profile, profileName,
             status: 'queued', output: '', command: 'cypress run --e2e', exitCode: null, outputTruncated: false, outputStartLine: 0, logError: null,
             logPath: '/example-project/spec-runner-logs/' + id + '/example.log', artifactDirectory: '/example-project/spec-runner-logs/' + id,
             createdAt: Date.now(), startedAt: null, finishedAt: null, waitReason: null };
-        batch.statuses[id] = 'queued'; batch.targets.push({ id, profileId: profile, browser }); return job;
-    }));
+        batch.statuses[id] = 'queued'; batch.targets.push({ id, profileId: profile, browser, specCount: assigned.length }); return job;
+    });
     groups.push(batch); jobs.push(...entries); batchCallback({ ...batch }); entries.forEach(emit); pump(); return { batch, runs: entries };
 }
 function pump() {
@@ -38,7 +42,8 @@ function pump() {
 }
 contextBridge.exposeInMainWorld('specRunner', {
     notifications: async enabled => ({ enabled: !!enabled, supported: true }), testNotification: async () => { project.testNotificationSent = true; }, onNotificationStatus: () => () => {}, onNotificationClick: () => () => {},
-    project: async () => project, refresh: async () => { project = { ...project, specModifiedTimes: { ...project.specModifiedTimes, [specs[2]]: 4000 } }; return project; }, runs: async () => jobs,
+    onSpecChanges: listener => { specCallback = listener; return () => {}; },
+    project: async () => project, refresh: async () => { specCallback(false); project = { ...project, specModifiedTimes: { ...project.specModifiedTimes, [specs[2]]: 4000 } }; return project; }, runs: async () => jobs,
     state: async id => { const job = jobs.find(job => job.id === id); if (!job) throw Error('Unknown run'); return job; },
     onRunState: listener => { callback = listener; return () => {}; },
     initialize: async config => { project = { ...project, config: normalize(config ?? project.config), initialized: true, configRevision: String(++revision), revision: String(revision), categories: [{ id: 'account', name: 'Account', specs: specs.slice(0,2) }, { id: 'catalog', name: 'Catalog', specs: specs.slice(2) }] }; return { project, changedFiles: ['spec-runner.config.json', '.spec-runner/categories.json', 'package.json', '.gitignore'] }; },
@@ -59,4 +64,4 @@ contextBridge.exposeInMainWorld('specRunner', {
     closeRun: async id => { remove(jobs.find(job => job.id === id)); }
 
 });
-contextBridge.exposeInMainWorld('specRunnerFixture', { finish: (id, status) => { const job = jobs.find(job => job.id === id); job.status = status; job.finishedAt = Date.now(); emit(job); pump(); }, append: (id, text) => { const job = jobs.find(job => job.id === id); job.output += text; emit(job); } });
+contextBridge.exposeInMainWorld('specRunnerFixture', { specsChanged: () => specCallback(true), finish: (id, status) => { const job = jobs.find(job => job.id === id); job.status = status; job.finishedAt = Date.now(); emit(job); pump(); }, append: (id, text) => { const job = jobs.find(job => job.id === id); job.output += text; emit(job); } });

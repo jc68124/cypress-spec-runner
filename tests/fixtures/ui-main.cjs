@@ -30,6 +30,7 @@ app.whenReady().then(async () => {
         assert(document.querySelector('aside[aria-label="Run controls"]').textContent.includes('Preview environment'),'Profile was not updated');
         assert(document.body.textContent.includes('.spec-runner/categories.json'),'Commit reminder missing file names');
         document.querySelector('[aria-label="Dismiss commit reminder"]').click();
+        button('Configure run').click();await wait(()=>document.querySelector('[aria-label="Split specs across targets"]'));document.querySelector('[aria-label="Split specs across targets"]').click();await new Promise(resolve=>requestAnimationFrame(resolve));assert(!button('Apply configuration').disabled,'Cannot prepare split mode before selecting specs');button('Cancel',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));
         button('Categories').click();
         await wait(()=>document.querySelector('article'));
         const card=document.querySelector('article[aria-label="Category Account"]');
@@ -82,7 +83,9 @@ app.whenReady().then(async () => {
         await wait(()=>document.querySelector('.spec-row input').checked);
         fill('spec-search','');
         specControl('spec-sort','modified-desc');
+        await window.specRunnerFixture.specsChanged();await wait(()=>document.querySelector('[aria-label="Spec changes detected"]'));assert(button('Refresh specs').title.includes('changed'),'Refresh did not explain the pending changes');
         button('Refresh specs').click();
+        await wait(()=>!document.querySelector('[aria-label="Spec changes detected"]'));
         await wait(()=>firstSpec().endsWith('Search.cy.ts'));
         await wait(()=>JSON.parse(localStorage.getItem('spec-runner:/example-project')).specSort==='modified-desc');
         assert(!document.body.textContent.includes('Saved locally.'),'Sorting created a shared-config commit reminder');
@@ -100,6 +103,7 @@ app.whenReady().then(async () => {
         const prettyArgs=argsEditor.value;argsEditor.focus();argsEditor.setSelectionRange(2,2);argsEditor.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));
         await wait(()=>argsEditor.value.startsWith('[\\n        "--config"'));
         await new Promise(resolve=>requestAnimationFrame(resolve));argsEditor.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true}));await wait(()=>argsEditor.value===prettyArgs);
+        fill('args-default','[\\n    "--config",');argsEditor.setSelectionRange(argsEditor.value.length,argsEditor.value.length);argsEditor.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await wait(()=>argsEditor.value.endsWith('\\n    '));await new Promise(resolve=>requestAnimationFrame(resolve));assert(argsEditor.selectionStart===argsEditor.value.length,'Enter did not restore the caret after indentation');fill('args-default',prettyArgs);
         argsEditor.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));const leaveEditor=new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true});argsEditor.dispatchEvent(leaveEditor);assert(!leaveEditor.defaultPrevented,'JSON editor trapped keyboard focus');
         const systemTab=new KeyboardEvent('keydown',{key:'Tab',ctrlKey:true,bubbles:true,cancelable:true});argsEditor.dispatchEvent(systemTab);assert(!systemTab.defaultPrevented,'JSON editor intercepted a system Tab shortcut');
         const revisionBeforeJson=(await window.specRunner.project()).configRevision;
@@ -186,6 +190,7 @@ app.whenReady().then(async () => {
         assert(lock() && lock().textContent.includes('1 active') && lock().textContent.includes('1 queued'),'Shared settings lock did not explain running and queued runs');
         assert(lock().textContent.includes('cancel queued runs'),'Lock notice did not explain how to unlock settings');
         assert(document.getElementById('project-name').disabled && button('Save project settings').disabled,'Shared settings were editable during runs');
+        await window.specRunnerFixture.specsChanged();await wait(()=>document.querySelector('[aria-label="Spec changes detected"]'));assert(button('Refresh specs').title.includes('Spec changes detected'),'Locked refresh lost its changes indicator');
         assert(button('Refresh specs').disabled && button('Refresh specs').title.includes('active or queued'),'Disabled refresh did not explain its lock');
         assert(!document.getElementById('preferred-browser').disabled,'Personal preferences were locked');
         const personalFollow=[...document.querySelectorAll('label')].find(label=>label.textContent.includes('Follow new output automatically')).querySelector('input');
@@ -297,6 +302,17 @@ app.whenReady().then(async () => {
         button('Stop run').click();await wait(()=>tab(11).textContent.includes('Stopped'));
         button('Run group details').click();await wait(()=>button('Rerun group'));button('Rerun group').click();await wait(()=>tab(12));button('Stop run').click();await wait(()=>tab(12).textContent.includes('Stopped'));
         await wait(()=>{const selected=tab(12).getBoundingClientRect(),list=document.querySelector('[aria-label="Run list"]').getBoundingClientRect();return selected.top>=list.top && selected.bottom<=list.bottom;});
+        button('Configure run').click();await wait(()=>document.querySelector('[aria-label="Split specs across targets"]'));
+        document.querySelector('[aria-label="Split specs across targets"]').click();await wait(()=>document.querySelector('[aria-label="Run configuration summary"]').textContent.includes('once each'));
+        assert(document.querySelector('[role=dialog]').textContent.includes('unused targets'),'Small split plan did not explain skipped targets');
+        button('Apply configuration',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));
+        await wait(()=>document.querySelector('[aria-label="Planned runs"]').textContent.includes('2 specs split across 2 runs'));
+        await wait(()=>button('Start 2 runs')&&!button('Start 2 runs').disabled);button('Start 2 runs').click();await wait(()=>tab(13)&&tab(14));
+        const splitJobs=await Promise.all(['run-13','run-14'].map(id=>window.specRunner.state(id)));
+        assert(splitJobs.every(job=>job.specs.length===1)&&new Set(splitJobs.flatMap(job=>job.specs)).size===2,'Split plan repeated specs');
+        assert(document.querySelector('[aria-label="Run group summary"]').textContent.includes('split specs'),'Run output hid the distribution mode');
+        button('View matrix').click();await wait(()=>document.querySelector('[role=dialog] table'));assert(document.querySelector('[role=dialog]').textContent.includes('1 specs'),'Matrix hid per-target spec counts');button('Done',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));
+        await window.specRunnerFixture.finish('run-13','passed');await window.specRunnerFixture.finish('run-14','passed');
         if(document.querySelector('[aria-label="Dismiss commit reminder"]'))document.querySelector('[aria-label="Dismiss commit reminder"]').click();
         return 'Setup, profile editing, category selection/editing, commit reminders, personal preferences, accessible help, browser restrictions, independent run tabs, queue cancellation, concurrency settings, and 1080p density passed.';
     })()`);

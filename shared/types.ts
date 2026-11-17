@@ -42,7 +42,8 @@ export interface Project {
 }
 export interface SaveResult { project: Project; changedFiles: string[] }
 export interface RunOptions { specs: string[]; profile: string; browser: Browser; headed: boolean; isolateArtifacts?: boolean }
-export interface MatrixOptions { specs: string[]; profiles: string[]; browsers: Browser[]; headed: boolean; isolateArtifacts?: boolean }
+export type ExecutionMode = 'repeat' | 'split';
+export interface MatrixOptions { specs: string[]; profiles: string[]; browsers: Browser[]; headed: boolean; isolateArtifacts?: boolean; executionMode?: ExecutionMode }
 export interface RunDetails { name: string; notes: string }
 export interface RunBatch {
     id: string;
@@ -52,8 +53,9 @@ export interface RunBatch {
     profiles: { id: string; name: string }[];
     browsers: Browser[];
     specCount: number;
+    executionMode?: ExecutionMode;
     statuses: Record<string, RunJob['status']>;
-    targets: { id: string; profileId: string; browser: Browser }[];
+    targets: { id: string; profileId: string; browser: Browser; specCount?: number }[];
     removed?: boolean;
 }
 export interface MatrixResult { batch: RunBatch; runs: RunJob[] }
@@ -96,6 +98,7 @@ export interface RunnerAPI {
     onNotificationStatus(listener: (status: NotificationStatus) => void): () => void;
     onNotificationClick(listener: (runId: string | null) => void): () => void;
     refresh(): Promise<Project>;
+    onSpecChanges(listener: (changed: boolean) => void): () => void;
     initialize(config?: ProjectConfig): Promise<SaveResult>;
     saveConfig(config: ProjectConfig, revision: string): Promise<SaveResult>;
     saveCategories(categories: Category[], revision: string): Promise<SaveResult>;
