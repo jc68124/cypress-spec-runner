@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       devcontainer: ${{ steps.paths.outputs.devcontainer }}
+      native: ${{ steps.paths.outputs.native }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,8 +29,14 @@ jobs:
           else
             echo "devcontainer=true" >> "$GITHUB_OUTPUT"
           fi
+          if git diff --quiet "$base" "$GITHUB_SHA" -- electron shared scripts/cypress-integration.cjs package.json pnpm-lock.yaml .github/workflows/ci.yml; then
+            echo "native=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "native=true" >> "$GITHUB_OUTPUT"
+          fi
 
   validate:
+    needs: changes
     timeout-minutes: 12
     strategy:
       fail-fast: false
@@ -46,6 +53,16 @@ jobs:
       - run: pnpm build
       - run: pnpm test
         timeout-minutes: 3
+      - name: Cache native Cypress runtime
+        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.native == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-native-${{ runner.os }}-16.1.0
+      - name: Verify live progress with native Cypress
+        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.native == 'true'
+        run: pnpm test:cypress
+        timeout-minutes: 6
       - run: npm pack --ignore-scripts
       - run: npm run smoke
       - run: pnpm run smoke

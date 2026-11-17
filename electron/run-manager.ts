@@ -3,7 +3,8 @@ import path from 'node:path';
 import { Runner } from './runner';
 import { PlainText } from './run-log';
 import { commandPreview, loadProject, validateRun } from './project';
-import type { ExecutionMode, MatrixOptions, MatrixResult, ProjectConfig, RunBatch, RunDetails, RunJob, RunOptions } from '../shared/types';
+import type { ExecutionMode, MatrixOptions, MatrixResult, ProjectConfig, RunBatch, RunDetails, RunJob, RunOptions, RunResults, RerunMode } from '../shared/types';
+import { failedSpecSelection, requireFailedSpecs } from '../shared/results';
 import { browserName } from '../shared/types';
 import { matrixRuns, validateMatrixTargets, maxOpenBatches, maxOpenRuns, pendingRun, validateRunDetails } from '../shared/runs';
 
@@ -11,7 +12,7 @@ type Entry = { job: RunJob; runner: Runner; config: ProjectConfig; options: RunO
 export class RunManager {
     private entries = new Map<string, Entry>();
     private groups = new Map<string, RunBatch>();
-    private plans = new Map<string, { id: string; options: RunOptions; details: RunDetails }[]>();
+    private plans = new Map<string, { id: string; options: RunOptions; details: RunDetails; results?: RunResults }[]>();
     private nextBatchNumber = 1;
     private preparing = 0;
     private shuttingDown = false;
@@ -38,8 +39,14 @@ export class RunManager {
     }
     batches(): RunBatch[] { return [...this.groups.values()].map(batch => structuredClone(batch)); }
     private group(id: string): RunBatch { const batch = this.groups.get(id); if (!batch) throw Error('This run group no longer exists.'); return batch; }
-    private notifyGroup(batch: RunBatch): void { batch.revision++; this.publishBatch(structuredClone(batch)); }
+    private notifyGroup(batch: RunBatch): void {
+        const failed = this.plans.get(batch.id)?.filter(target => batch.statuses[target.id] === 'failed') ?? [];
+        batch.failedSpecsProblem = Object.values(batch.statuses).some(status => pendingRun({ status })) ? 'Finish, stop or cancel this group first.' : !failed.length ? 'There are no failed runs in this group.' : failed.map(target => failedSpecSelection(target.results, target.options.specs).problem).find(Boolean);
+        batch.revision++; this.publishBatch(structuredClone(batch));
+    }
     private notify(entry: Entry): void {
+        const plan = this.plans.get(entry.job.batchId)?.find(target => target.id === entry.job.id);
+        if (plan && !pendingRun(entry.job)) plan.results = entry.job.results;
         const batch = this.group(entry.job.batchId);
         if (batch.statuses[entry.job.id] !== entry.job.status) { batch.statuses[entry.job.id] = entry.job.status; this.notifyGroup(batch); }
         entry.job.revision++; this.publish(this.copy(entry.job));
@@ -73,18 +80,23 @@ export class RunManager {
         const selection = structuredClone(input);
         return this.enqueueOptions(matrixRuns(selection), undefined, undefined, selection.executionMode ?? 'repeat', selection);
     }
-    async rerun(id: string): Promise<MatrixResult> {
+    async rerun(id: string, mode: RerunMode = 'all'): Promise<MatrixResult> {
+        if (mode !== 'all' && mode !== 'failed-specs') throw Error('Choose the full run or failed specs.');
         const entry = this.entry(id);
         if (pendingRun(entry.job)) throw Error('Finish or stop this run before rerunning it.');
-        return this.enqueueOptions([structuredClone(entry.options)], `${entry.job.name} (rerun)`, [{ name: entry.job.name, notes: entry.job.notes }], this.group(entry.job.batchId).executionMode);
+        const options = structuredClone(entry.options);
+        if (mode === 'failed-specs') options.specs = requireFailedSpecs(entry.job.results, options.specs);
+        return this.enqueueOptions([options], `${entry.job.name} (${mode === 'failed-specs' ? 'failed specs' : 'rerun'})`, [{ name: entry.job.name, notes: entry.job.notes }], this.group(entry.job.batchId).executionMode);
     }
-    async rerunBatch(id: string, mode: 'all' | 'failed'): Promise<MatrixResult> {
+    async rerunBatch(id: string, mode: 'all' | 'failed' | 'failed-specs'): Promise<MatrixResult> {
         const batch = this.group(id);
-        if (mode !== 'all' && mode !== 'failed') throw Error('Choose all runs or failed runs.');
+        if (mode !== 'all' && mode !== 'failed' && mode !== 'failed-specs') throw Error('Choose all runs, failed runs or failed specs.');
         if (Object.values(batch.statuses).some(status => pendingRun({ status }))) throw Error('Finish, stop or cancel this group before rerunning it.');
         const targets = this.plans.get(id)!.filter(target => mode === 'all' || batch.statuses[target.id] === 'failed');
         if (!targets.length) throw Error('There are no failed runs to rerun.');
-        return this.enqueueOptions(targets.map(target => structuredClone(target.options)), `${batch.name} (${mode === 'failed' ? 'failed rerun' : 'rerun'})`, targets.map(target => ({ ...target.details })), batch.executionMode);
+        // Validate every failed target before enqueuing any subset; never expand pairs into a new matrix.
+        const options = targets.map(target => ({ ...structuredClone(target.options), ...(mode === 'failed-specs' ? { specs: requireFailedSpecs(target.results, target.options.specs) } : {}) }));
+        return this.enqueueOptions(options, `${batch.name} (${mode === 'failed-specs' ? 'failed specs' : mode === 'failed' ? 'failed rerun' : 'rerun'})`, targets.map(target => ({ ...target.details })), batch.executionMode);
     }
     private async enqueueOptions(combinations: RunOptions[], name?: string, details?: RunDetails[], executionMode: ExecutionMode = 'repeat', selection?: MatrixOptions): Promise<MatrixResult> {
         if (this.shuttingDown) throw Error('The application is stopping its runs.');

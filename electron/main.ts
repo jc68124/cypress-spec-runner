@@ -3,7 +3,7 @@ import path from 'node:path';
 import { stat, realpath } from 'node:fs/promises';
 import { saveLocal } from './local-state';
 import { RunHistory } from './history';
-import { resultArtifacts } from '../shared/results';
+import { resultArtifacts, requireFailedSpecs } from '../shared/results';
 import { mkdir } from 'node:fs/promises';
 import { registerNotificationIdentity } from './notification-identity';
 import { BatchNotifier, type CompletionNotice } from './batch-notifier';
@@ -12,7 +12,7 @@ import { isAppDocumentUrl } from './app-url';
 import { commandPreview, findProject, initializeProject, loadProject, saveCategories, saveConfig, validateRun } from './project';
 import { SpecChanges } from './spec-changes';
 import { RunManager } from './run-manager';
-import type { Category, ProjectConfig, RunOptions, SaveResult } from '../shared/types';
+import type { Category, ProjectConfig, RunOptions, SaveResult, RerunMode } from '../shared/types';
 import { matrixRuns, validateMatrixTargets, validateRunDetails } from '../shared/runs';
 import type { MatrixOptions, RunDetails } from '../shared/types';
 
@@ -110,7 +110,14 @@ app.whenReady().then(async () => {
     handle('history:list', () => history.list());
     handle('history:detail', (id: string) => history.detail(id));
     handle('history:forget', (id?: string) => history.forget(id));
-    handle('history:rerun', async (id: string) => { if (saving) throw Error('Wait for the save to finish.'); const job = await history.detail(id); const details = validateRunDetails({ name: job.name, notes: job.notes }); const result = await runs.enqueueMatrix({ specs: job.specs, profiles: [job.profileId], browsers: [job.browser], headed: job.headed, isolateArtifacts: job.isolateArtifacts }); result.runs = result.runs.map(run => runs.update(run.id, details)); result.batch = runs.renameBatch(result.batch.id, `${job.name} (rerun)`.slice(0, 100)); return result; });
+    handle('history:rerun', async (id: string, mode: RerunMode = 'all') => {
+        if (saving) throw Error('Wait for the save to finish.');
+        if (mode !== 'all' && mode !== 'failed-specs') throw Error('Choose the full run or failed specs.');
+        const job = await history.detail(id), specs = mode === 'failed-specs' ? requireFailedSpecs(job.results, job.specs) : job.specs;
+        const details = validateRunDetails({ name: job.name, notes: job.notes });
+        const result = await runs.enqueueMatrix({ specs, profiles: [job.profileId], browsers: [job.browser], headed: job.headed, isolateArtifacts: job.isolateArtifacts });
+        result.runs = result.runs.map(run => runs.update(run.id, details)); result.batch = runs.renameBatch(result.batch.id, `${job.name} (${mode === 'failed-specs' ? 'failed specs' : 'rerun'})`.slice(0, 100)); return result;
+    });
     handle('history:log', async (id: string, location = false) => {
         const job = await history.detail(id); if (!job.logPath || job.logError) throw Error(job.logError ?? 'This run has no saved log.');
         const actual = await realpath(job.logPath); if (!actual.startsWith(await realpath(path.join(root, 'spec-runner-logs', id)) + path.sep)) throw Error('The saved log is outside its run folder.');
@@ -135,8 +142,8 @@ app.whenReady().then(async () => {
         return validated.map(option => commandPreview(option, project.config, undefined, project.cypressVersion)).join('\n');
     });
     handle('matrix:start', (options: MatrixOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runs.enqueueMatrix(options); });
-    handle('run:rerun', (id: string) => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerun(id); });
-    handle('batch:rerun', (id: string, mode: 'all' | 'failed') => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerunBatch(id, mode); });
+    handle('run:rerun', (id: string, mode: RerunMode = 'all') => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerun(id, mode); });
+    handle('batch:rerun', (id: string, mode: 'all' | 'failed' | 'failed-specs') => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerunBatch(id, mode); });
     handle('run:update', (id: string, details: RunDetails) => runs.update(id, details));
     handle('batch:list', () => runs.batches());
     handle('batch:rename', (id: string, name: string) => runs.renameBatch(id, name));

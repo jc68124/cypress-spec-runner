@@ -6,7 +6,10 @@ export interface RunPreset { id: string; name: string; options: MatrixOptions }
 export interface LocalState { revision: string; browserPaths: Record<string, string>; presets: RunPreset[] }
 export interface TestResult { title: string; state: string; duration: number; attempts: number; error?: string }
 export interface SpecResult { spec: string; passed: number; failed: number; pending: number; skipped: number; duration: number; tests: TestResult[]; screenshots: string[]; video?: string; error?: string }
-export interface RunResults { total: number; passed: number; failed: number; pending: number; skipped: number; duration: number; specs: SpecResult[]; truncated?: boolean; error?: string }
+export interface RunResults { total: number; passed: number; failed: number; pending: number; skipped: number; duration: number; specs: SpecResult[]; truncated?: boolean; error?: string; failedSpecs?: string[]; failedSpecsComplete?: boolean }
+export type RerunMode = 'all' | 'failed-specs';
+export interface ProgressSpec { spec: string; state: 'waiting' | 'running' | 'passed' | 'failed' | 'skipped' | 'unknown'; passed: number; failed: number; pending: number; skipped: number; duration: number; error?: string }
+export interface RunProgress { phase: 'starting' | 'running' | 'finishing' | 'complete' | 'unavailable'; total: number; completed: number; currentSpec?: string; passed: number; failed: number; pending: number; skipped: number; specs: ProgressSpec[]; truncated?: boolean; message?: string }
 export interface HistoryEntry { id: string; name: string; groupName: string; profileId: string; profileName: string; browser: string; browserName: string; status: 'passed' | 'failed' | 'stopped'; createdAt: number; finishedAt: number; duration: number; specCount: number; counts?: Pick<RunResults, 'total' | 'passed' | 'failed' | 'pending' | 'skipped'> }
 export interface HistoryDetail extends HistoryEntry { specs: string[]; headed: boolean; isolateArtifacts: boolean; notes: string; logPath: string | null; logError?: string | null; results?: RunResults; resultsError?: string }
 export interface HistoryList { entries: HistoryEntry[]; error?: string }
@@ -69,6 +72,7 @@ export interface RunBatch {
     browserNames?: Record<string, string>;
     specCount: number;
     executionMode?: ExecutionMode;
+    failedSpecsProblem?: string;
     statuses: Record<string, RunJob['status']>;
     targets: { id: string; profileId: string; browser: Browser; specCount?: number }[];
     removed?: boolean;
@@ -85,6 +89,7 @@ export interface RunState {
     logError: string | null;
     results?: RunResults;
     resultsError?: string;
+    progress?: RunProgress;
 }
 export interface RunJob extends Omit<RunState, 'status'> {
     id: string;
@@ -118,7 +123,7 @@ export interface RunnerAPI {
     historyDetail(id: string): Promise<HistoryDetail>;
     historyLog(id: string, location?: boolean): Promise<void>;
     forgetHistory(id?: string): Promise<void>;
-    rerunHistory(id: string): Promise<MatrixResult>;
+    rerunHistory(id: string, mode?: RerunMode): Promise<MatrixResult>;
     notifications(enabled?: boolean): Promise<NotificationStatus>;
     testNotification(): Promise<void>;
     onNotificationStatus(listener: (status: NotificationStatus) => void): () => void;
@@ -131,8 +136,8 @@ export interface RunnerAPI {
     preview(options: RunOptions): Promise<string>;
     run(options: RunOptions): Promise<RunJob>;
     runMatrix(options: MatrixOptions): Promise<MatrixResult>;
-    rerun(id: string): Promise<MatrixResult>;
-    rerunBatch(id: string, mode: 'all' | 'failed'): Promise<MatrixResult>;
+    rerun(id: string, mode?: RerunMode): Promise<MatrixResult>;
+    rerunBatch(id: string, mode: 'all' | 'failed' | 'failed-specs'): Promise<MatrixResult>;
     previewMatrix(options: MatrixOptions): Promise<string>;
     batches(): Promise<RunBatch[]>;
     updateRun(id: string, details: RunDetails): Promise<RunJob>;

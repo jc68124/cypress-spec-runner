@@ -37,10 +37,10 @@ async function main() {
         await fs.mkdir(path.join(root, 'cypress/e2e'), { recursive: true });
         await fs.writeFile(path.join(root, 'fake-cypress/package.json'), JSON.stringify({ name: 'cypress', version: '16.0.0', main: 'index.cjs', bin: { cypress: 'bin/cypress' } }));
         await fs.writeFile(path.join(root, 'fake-cypress/bin/cypress'), "console.log(JSON.stringify({args:process.argv.slice(2),value:process.env.EXAMPLE_SETTING}));setTimeout(()=>{},500);");
-        await fs.writeFile(path.join(root, 'fake-cypress/index.cjs'), "exports.cli={parseRunArguments:async args=>{if(args[0]!=='cypress'||args[1]!=='run')throw Error('Module parser prefix missing');return {args:args.slice(1)};}};\nexports.run=async options=>{\n    if(options.project!==process.cwd())throw Error('Module API project root missing');\n    const fs=require('node:fs'),path=require('node:path'),args=options.args;\n    console.log(JSON.stringify({args,value:process.env.EXAMPLE_SETTING}));\n    const specs=args[args.indexOf('--spec')+1].split(','),folder=process.env.SPEC_RUNNER_ARTIFACTS_DIR;\n    fs.mkdirSync(folder,{recursive:true});\n    const screenshot=path.join(folder,'screenshot.png');fs.writeFileSync(screenshot,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=','base64'));\n    await new Promise(resolve=>setTimeout(resolve,150));\n    return {totalTests:specs.length,totalPassed:specs.length,totalFailed:0,totalPending:0,totalSkipped:0,totalDuration:150,config:{env:{TOKEN:'raw_config_secret_do_not_store'}},runs:specs.map(spec=>({spec:{relative:spec},stats:{passes:1,failures:0,pending:0,skipped:0,wallClockDuration:150},tests:[{title:['Example','passes after retry'],state:'passed',attempts:[{state:'failed',wallClockDuration:100},{state:'passed',wallClockDuration:50}]}],screenshots:[{path:screenshot}],video:null}))};\n};\n");
+        await fs.copyFile(path.join(__dirname, '../tests/fixtures/fake-cypress.cjs'), path.join(root, 'fake-cypress/index.cjs'));
         await fs.writeFile(path.join(root, 'cypress/e2e/example.cy.ts'), '');
         await fs.writeFile(path.join(root, 'portable browser'), 'fixture browser');
-        await fs.writeFile(path.join(root, 'cypress.config.ts'), "import {defineConfig} from 'cypress'; throw Error('Discovery must not execute config'); export default defineConfig({e2e:{specPattern:'cypress/e2e/**/*.cy.ts'}});");
+        await fs.writeFile(path.join(root, 'cypress.config.cjs'), "require('node:fs').writeFileSync('config-loaded.txt','runtime only');module.exports={e2e:{specPattern:'cypress/e2e/**/*.cy.ts'}};");
         await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'example-consumer', private: true, devDependencies: { cypress: 'file:./fake-cypress', [ownPackage.name]: 'file:' + archive } }));
         await execute(process.execPath, installArguments(process.env.npm_execpath, process.env.npm_config_user_agent), root);
         const installed = await fs.realpath(path.join(root, 'node_modules', ownPackage.name));
@@ -50,6 +50,7 @@ async function main() {
         const configured = JSON.parse(await fs.readFile(path.join(root, 'spec-runner.config.json'), 'utf8'));
         await fs.access(path.resolve(root, configured.$schema));
         assert.equal(JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).scripts['spec-runner'], 'cypress-spec-runner');
+        await assert.rejects(fs.access(path.join(root, 'config-loaded.txt')));
         await assert.rejects(fs.access(path.join(root, 'node_modules/typescript')));
         await assert.rejects(fs.access(path.join(root, 'node_modules/vite')));
         const configFile = path.join(root, 'spec-runner.config.json');
@@ -59,7 +60,7 @@ async function main() {
         await fs.writeFile(configFile, JSON.stringify(config));
         await fs.writeFile(path.join(root, '.env'), 'EXAMPLE_LOCAL_VALUE=fixture-value');
         const harness = path.join(root, 'package-main.cjs');
-        for (const file of ['package-main.cjs', 'package-run-check.cjs', 'package-split-check.cjs', 'package-history-check.cjs']) await fs.copyFile(path.join(__dirname, '../tests/fixtures', file), path.join(root, file));
+        for (const file of ['package-main.cjs', 'package-run-check.cjs', 'package-split-check.cjs', 'package-history-check.cjs', 'package-progress-check.cjs']) await fs.copyFile(path.join(__dirname, '../tests/fixtures', file), path.join(root, file));
         const requireFromPackage = require('node:module').createRequire(path.join(installed, 'package.json'));
         const electron = requireFromPackage('electron');
         const env = { ...process.env, SPEC_RUNNER_PROJECT: root, SPEC_RUNNER_NODE: process.execPath, SPEC_RUNNER_PACKAGE: installed };
@@ -88,7 +89,7 @@ async function main() {
         assert.equal(state.results.total, 1); assert.equal(state.results.specs[0].tests[0].attempts, 2);
         const reopened = await execute(electron, [...(process.platform === 'linux' ? ['--no-sandbox', '--ozone-platform=headless'] : []), '--disable-gpu', harness], root, { ...env, SPEC_RUNNER_SMOKE_PHASE: 'history' });
         assert.match(reopened, /HISTORY_REOPENED:/);
-        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs. A split matrix executed seven specs exactly once across four workers, and file changes reached the refresh indicator. Module API results, custom browser channels/local bindings, local/shared presets, owned artifact actions and history across an app restart passed.');
+        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs. A split matrix executed seven specs exactly once across four workers, and file changes reached the refresh indicator. Live progress before completion, failed-spec reruns for exact matrix targets and saved History, Module API results, custom browser channels/local bindings, local/shared presets, owned artifact actions and history across an app restart passed.');
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 }
 module.exports = { archiveFilename, installArguments };

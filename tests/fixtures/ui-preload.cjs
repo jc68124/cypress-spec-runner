@@ -52,7 +52,7 @@ function pump() {
 contextBridge.exposeInMainWorld('specRunner', {
     saveLocal: async state=>{project={...project,local:{...state,revision:String(++revision)}};return {state:project.local,changedFiles:[]};},
     chooseBrowser:async()=>'/example-project/browser executable',openArtifact:async(id,filename,historical)=>{project.artifactOpened=filename;project.artifactOpenedHistorical=historical;},
-    history:async()=>{await action('history');return {entries:[...recent.values()]};},historyDetail:async id=>recent.get(id),historyLog:async id=>{project.historyLogOpened=id;},forgetHistory:async id=>{if(id)recent.delete(id);else recent.clear();},rerunHistory:async id=>{const job=recent.get(id);return runMatrix({specs:job.specs,profiles:[job.profileId],browsers:[job.browser],headed:job.headed});},
+    history:async()=>{await action('history');return {entries:[...recent.values()]};},historyDetail:async id=>recent.get(id),historyLog:async id=>{project.historyLogOpened=id;},forgetHistory:async id=>{if(id)recent.delete(id);else recent.clear();},rerunHistory:async (id,mode)=>{const job=recent.get(id);project.lastHistoryRerun={id,mode};return runMatrix({specs:mode==='failed-specs'?job.results.specs.filter(spec=>spec.failed||spec.error).map(spec=>spec.spec):job.specs,profiles:[job.profileId],browsers:[job.browser],headed:job.headed});},
     notifications: async enabled => ({ enabled: !!enabled, supported: true }), testNotification: async () => { project.testNotificationSent = true; }, onNotificationStatus: () => () => {}, onNotificationClick: () => () => {},
     onSpecChanges: listener => { specCallback = listener; return () => {}; },
     project: async () => project, refresh: async () => { specCallback(false); project = { ...project, specModifiedTimes: { ...project.specModifiedTimes, [specs[2]]: 4000 } }; return project; }, runs: async () => jobs,
@@ -64,7 +64,7 @@ contextBridge.exposeInMainWorld('specRunner', {
     preview: async () => 'cypress run --e2e --spec example', copy: async text => {await action('copy');project.copiedSummary=text;}, openLogLocation: async id => { project.logRevealed = id; }, openLog: async id => { project.logOpened = id; }, copyOutput: async id => { project.copiedOutput = jobs.find(job => job.id === id).output; },
     run: async options => runMatrix({ ...options, profiles: [options.profile], browsers: [options.browser] }).runs[0],
     runMatrix: async options => runMatrix(options),
-    rerun: async id => { const job=jobs.find(job=>job.id===id);return runMatrix({...job,profiles:[job.profileId],browsers:[job.browser]}); },
+    rerun: async (id,mode) => { const job=jobs.find(job=>job.id===id);project.lastRerun={id,mode};return runMatrix({...job,specs:mode==='failed-specs'?job.results.specs.filter(spec=>spec.failed||spec.error).map(spec=>spec.spec):job.specs,profiles:[job.profileId],browsers:[job.browser]}); },
     rerunBatch: async id => { const group=groups.find(group=>group.id===id);return runMatrix({specs:specs.slice(0,group.specCount),profiles:group.profiles.map(profile=>profile.id),browsers:group.browsers,headed:false}); },
     previewMatrix: async () => 'cypress run --e2e --spec example',
     batches: async () => groups,
@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('specRunner', {
 
 });
 contextBridge.exposeInMainWorld('specRunnerFixture', {
+    progress: (id,progress) => { const job=jobs.find(job=>job.id===id);job.progress=progress;emit(job); },
     hold: name => { let resolve; const promise = new Promise(done => { resolve = done; }); heldActions.set(name, {promise,resolve}); },
     release: name => { heldActions.get(name)?.resolve(); heldActions.delete(name); },
     failNext: (name, message) => { actionFailures.set(name, message); },

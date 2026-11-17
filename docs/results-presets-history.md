@@ -2,6 +2,18 @@
 
 ## Test results
 
+The **Runs** screen opens on **Progress**. It shows startup/queue state, the current spec, completed/total files, and pass/fail/pending/skipped counts from completed specs. Individual test details and artifacts replace the live file list after the full run finishes. Counts update at spec boundaries, rather than during each test. Stopped runs retain their last observed progress without claiming incomplete files passed.
+
+**Raw output** contains the full terminal controls, including follow, copy and search. Ctrl/Cmd+F switches to that tab and opens search. The chosen display tab is retained during the app session; new sessions default to Progress. Complete logs are saved regardless of the selected tab.
+
+Live events use Cypress's `before:run`, `before:spec`, `after:spec` and `after:run` hooks. The adapter generates a temporary config wrapper inside the ignored run-log directory, loads the original config through Cypress's own loader, and preserves its reporter, async setup, node hooks, tasks and returned configuration. The original config file is not rewritten. The wrapper sends bounded summaries to a short-lived, authenticated loopback connection and is removed when the run finishes or stops. A failed progress connection never fails a user hook; unavailable progress has a Raw output shortcut. CLI-only Cypress distributions retain raw output and explain why structured progress is unavailable.
+
+### Rerunning failed files
+
+**Rerun failed specs** is available for completed runs, group details and saved History items. It includes files with final failures or spec errors such as compilation failures; a test passing after retries does not make its file fail. Each spec runs all of its tests again.
+
+Group reruns keep exact file/profile/browser combinations, including split assignments and closed output rows. They retain names, notes and artifact-isolation preferences while using current project configuration and browser bindings. Every target is validated before anything is queued. Missing files, incomplete results or startup failures without identified files block this action with an explanation; use **Rerun** or **Rerun failed runs** for those cases. Aggregate results retain a separately bounded failed-file index, so detailed result truncation does not silently omit failures from a rerun.
+
 Use the compact results button beside a completed run's output controls. It opens a dialog with actual passed, failed, pending and skipped test counts, duration, spec names and individual final test states. Retried tests show their attempt count; a test that passes on retry counts once as passed. The default filter shows failed specs and spec errors. Expand a spec to inspect test errors and open screenshots or its video using the system's default application. Missing/deleted artifacts report an error without changing the run result. **Copy results** creates a concise plain-text summary for sharing.
 
 Cypress's Module API supplies the data while the existing project reporter continues to run. Full Cypress configuration and environment objects are discarded from captured results. Detailed capture is bounded to 500 specs, 2,000 tests and 1,000 screenshot paths with a shared text budget; a notice explains when details were limited. Aggregate totals remain complete. Stopping or failing to start Cypress can leave results unavailable; the output and saved log remain the source of diagnostics.
