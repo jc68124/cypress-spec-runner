@@ -15,8 +15,8 @@ export function CategoryEditor({ category, specs, existing, onClose, onSave }: {
         catch (error) { setError(String((error as Error).message)); } finally { setBusy(false); }
     }
     return <Modal title={existing ? 'Edit category' : 'New category'} description="Categories are shared project configuration. Saving changes updates the category file in your repository." onClose={() => { if (!busy) onClose(); }} actions={<>
-        {existing && <Button kind="danger" disabled={busy} onClick={() => { if (deleting) void save(true); else setDeleting(true); }}>{deleting ? 'Confirm delete' : 'Delete category'}</Button>}
-        <Button kind="plain" disabled={busy} onClick={onClose}>Cancel</Button><Button kind="primary" disabled={busy || !name.trim()} onClick={() => void save()}>{busy ? 'Saving…' : 'Save category'}</Button>
+        {existing && <Button kind="danger" disabled={busy} onClick={() => { if (deleting) return save(true); else setDeleting(true); }}>{deleting ? 'Confirm delete' : 'Delete category'}</Button>}
+        <Button kind="plain" disabled={busy} onClick={onClose}>Cancel</Button><Button kind="primary" disabled={busy || !name.trim()} onClick={() => save()}>{busy ? 'Saving…' : 'Save category'}</Button>
     </>}>
         <label className="field-label" htmlFor="category-name">Category name</label><input id="category-name" autoFocus value={name} maxLength={100} onChange={event => setName(event.target.value)} />
         <label className="field-label mt-4" htmlFor="category-search">Find specs to assign</label><input id="category-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by file or folder…" />

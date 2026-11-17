@@ -2,6 +2,13 @@ const { contextBridge } = require('electron');
 let revision = 0, callback = () => {}, sequence = 0;
 let specCallback = () => {};
 const recent = new Map();
+const heldActions = new Map(), actionFailures = new Map();
+async function action(name) {
+    project.actionCalls = { ...project.actionCalls, [name]: (project.actionCalls?.[name] ?? 0) + 1 };
+    if (heldActions.has(name)) await heldActions.get(name).promise;
+    const failure = actionFailures.get(name); actionFailures.delete(name);
+    if (failure) throw Error(failure);
+}
 let jobs = [], groups = [], groupSequence = 0, batchCallback = () => {};
 const specs = ['cypress/e2e/account/Sign in.cy.ts', 'cypress/e2e/account/Sign out.cy.ts', 'cypress/e2e/catalog/Search.cy.ts'];
 let project = { local: {revision:'0',browserPaths:{},presets:[]}, root: '/example-project', initialized: false, configRevision: 'missing', revision: 'missing', specs, specModifiedTimes: { [specs[0]]: 2000, [specs[1]]: 3000, [specs[2]]: 1000 }, categories: [], config: {
@@ -44,8 +51,8 @@ function pump() {
 }
 contextBridge.exposeInMainWorld('specRunner', {
     saveLocal: async state=>{project={...project,local:{...state,revision:String(++revision)}};return {state:project.local,changedFiles:[]};},
-    chooseBrowser:async()=>'/example-project/browser executable',openArtifact:async(id,filename)=>{project.artifactOpened=filename;},
-    history:async()=>({entries:[...recent.values()]}),historyDetail:async id=>recent.get(id),historyLog:async id=>{project.historyLogOpened=id;},forgetHistory:async id=>{if(id)recent.delete(id);else recent.clear();},rerunHistory:async id=>{const job=recent.get(id);return runMatrix({specs:job.specs,profiles:[job.profileId],browsers:[job.browser],headed:job.headed});},
+    chooseBrowser:async()=>'/example-project/browser executable',openArtifact:async(id,filename,historical)=>{project.artifactOpened=filename;project.artifactOpenedHistorical=historical;},
+    history:async()=>{await action('history');return {entries:[...recent.values()]};},historyDetail:async id=>recent.get(id),historyLog:async id=>{project.historyLogOpened=id;},forgetHistory:async id=>{if(id)recent.delete(id);else recent.clear();},rerunHistory:async id=>{const job=recent.get(id);return runMatrix({specs:job.specs,profiles:[job.profileId],browsers:[job.browser],headed:job.headed});},
     notifications: async enabled => ({ enabled: !!enabled, supported: true }), testNotification: async () => { project.testNotificationSent = true; }, onNotificationStatus: () => () => {}, onNotificationClick: () => () => {},
     onSpecChanges: listener => { specCallback = listener; return () => {}; },
     project: async () => project, refresh: async () => { specCallback(false); project = { ...project, specModifiedTimes: { ...project.specModifiedTimes, [specs[2]]: 4000 } }; return project; }, runs: async () => jobs,
@@ -54,7 +61,7 @@ contextBridge.exposeInMainWorld('specRunner', {
     initialize: async config => { project = { ...project, config: normalize(config ?? project.config), initialized: true, configRevision: String(++revision), revision: String(revision), categories: [{ id: 'account', name: 'Account', specs: specs.slice(0,2) }, { id: 'catalog', name: 'Catalog', specs: specs.slice(2) }] }; return { project, changedFiles: ['spec-runner.config.json', '.spec-runner/categories.json', 'package.json', '.gitignore'] }; },
     saveConfig: async config => { project = { ...project, config: normalize(config), configRevision: String(++revision) }; return { project, changedFiles: ['spec-runner.config.json'] }; },
     saveCategories: async categories => { project = { ...project, categories, revision: String(++revision) }; return { project, changedFiles: ['.spec-runner/categories.json'] }; },
-    preview: async () => 'cypress run --e2e --spec example', copy: async text => {project.copiedSummary=text;}, openLogLocation: async id => { project.logRevealed = id; }, openLog: async id => { project.logOpened = id; }, copyOutput: async id => { project.copiedOutput = jobs.find(job => job.id === id).output; },
+    preview: async () => 'cypress run --e2e --spec example', copy: async text => {await action('copy');project.copiedSummary=text;}, openLogLocation: async id => { project.logRevealed = id; }, openLog: async id => { project.logOpened = id; }, copyOutput: async id => { project.copiedOutput = jobs.find(job => job.id === id).output; },
     run: async options => runMatrix({ ...options, profiles: [options.profile], browsers: [options.browser] }).runs[0],
     runMatrix: async options => runMatrix(options),
     rerun: async id => { const job=jobs.find(job=>job.id===id);return runMatrix({...job,profiles:[job.profileId],browsers:[job.browser]}); },
@@ -69,4 +76,9 @@ contextBridge.exposeInMainWorld('specRunner', {
     closeRun: async id => { remove(jobs.find(job => job.id === id)); }
 
 });
-contextBridge.exposeInMainWorld('specRunnerFixture', { specsChanged: () => specCallback(true), finish: (id, status) => { const job = jobs.find(job => job.id === id); job.status = status; job.results={total:2,passed:status==='failed'?1:2,failed:status==='failed'?1:0,pending:0,skipped:0,duration:100,specs:[{spec:job.specs[0],passed:status==='failed'?1:2,failed:status==='failed'?1:0,pending:0,skipped:0,duration:100,tests:[{title:'Example retry',state:'passed',attempts:2,duration:100}],screenshots:['/example-project/screenshot.png'],video:'/example-project/video.mp4'}]}; job.finishedAt = Date.now(); emit(job); pump(); }, append: (id, text) => { const job = jobs.find(job => job.id === id); job.output += text; emit(job); } });
+contextBridge.exposeInMainWorld('specRunnerFixture', {
+    hold: name => { let resolve; const promise = new Promise(done => { resolve = done; }); heldActions.set(name, {promise,resolve}); },
+    release: name => { heldActions.get(name)?.resolve(); heldActions.delete(name); },
+    failNext: (name, message) => { actionFailures.set(name, message); },
+    specsChanged: () => specCallback(true), finish: (id, status) => { const job = jobs.find(job => job.id === id); job.status = status; job.results={total:2,passed:status==='failed'?1:2,failed:status==='failed'?1:0,pending:0,skipped:0,duration:100,specs:[{spec:job.specs[0],passed:status==='failed'?1:2,failed:status==='failed'?1:0,pending:0,skipped:0,duration:100,tests:[{title:'Example retry',state:'passed',attempts:2,duration:100}],screenshots:['/example-project/screenshot.png'],video:'/example-project/video.mp4'}]}; job.finishedAt = Date.now(); emit(job); pump(); }, append: (id, text) => { const job = jobs.find(job => job.id === id); job.output += text; emit(job); }
+});

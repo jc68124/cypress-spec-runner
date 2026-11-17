@@ -1,8 +1,40 @@
-import { useId, useRef, useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useId, useRef, useEffect, useState, type ButtonHTMLAttributes, type MouseEvent, type ReactNode } from 'react';
 import * as Headless from '@headlessui/react';
 
-export function Button({ children, kind = 'outline', small = false, className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { kind?: 'outline' | 'primary' | 'plain' | 'danger'; small?: boolean }) {
-    return <button type="button" {...props} className={`btn btn-${kind} ${small ? 'btn-small' : ''} ${className}`}>{children}</button>;
+export type ActionButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & {
+    onClick?: (event: MouseEvent<HTMLButtonElement>) => void | Promise<unknown>;
+    successLabel?: string;
+};
+export function useButtonAction(onClick: ActionButtonProps['onClick'], successLabel?: string) {
+    const [busy, setBusy] = useState(false), [feedback, setFeedback] = useState(''), [error, setError] = useState('');
+    const running = useRef(false), mounted = useRef(true), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    useEffect(() => { mounted.current = true; return () => { mounted.current = false; clearTimeout(timer.current); }; }, []);
+    function click(event: MouseEvent<HTMLButtonElement>) {
+        if (running.current) return;
+        clearTimeout(timer.current); setFeedback(''); setError('');
+        function finish(succeeded: boolean, failure?: unknown) {
+            running.current = false;
+            if (!mounted.current) return;
+            setBusy(false);
+            if (!succeeded) setError(failure instanceof Error ? failure.message : failure ? String(failure) : 'Action failed. Please try again.');
+            else if (successLabel) { setFeedback(successLabel); timer.current = setTimeout(() => setFeedback(''), 2000); }
+        }
+        try {
+            const result = onClick?.(event);
+            if (result && typeof result.then === 'function') {
+                running.current = true; setBusy(true);
+                void result.then(() => finish(true), error => finish(false, error));
+            } else finish(true);
+        } catch (error) { finish(false, error); }
+    }
+    return { busy, feedback, error, click };
+}
+export function Spinner() { return <span aria-hidden="true" className="button-spinner" />; }
+export function Button({ children, kind = 'outline', small = false, className = '', onClick, successLabel, disabled, ...props }: ActionButtonProps & { kind?: 'outline' | 'primary' | 'plain' | 'danger'; small?: boolean }) {
+    const action = useButtonAction(onClick, successLabel);
+    return <button type="button" {...props} disabled={disabled || action.busy} aria-busy={action.busy || undefined} title={action.error || props.title} onClick={action.click} className={`btn btn-${kind} ${small ? 'btn-small' : ''} ${className}`}>
+        {action.busy && <Spinner />}{action.error ? <span role="alert" className="max-w-64 truncate">Failed: {action.error}</span> : action.feedback ? <span role="status">{action.feedback}</span> : children}
+    </button>;
 }
 export function Help({ label, children }: { label: string; children: ReactNode }) {
     const id = useId();
