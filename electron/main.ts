@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, Notification, shell, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
+import { registerNotificationIdentity } from './notification-identity';
 import { BatchNotifier, type CompletionNotice } from './batch-notifier';
 import { realpathSync } from 'node:fs';
 import { isAppDocumentUrl } from './app-url';
@@ -13,6 +14,10 @@ import type { MatrixOptions, RunDetails } from '../shared/types';
 const appName = 'Cypress Spec Runner';
 app.setName(appName);
 const notificationAppId = 'CypressSpecRunner.Desktop';
+if (process.platform === 'win32') {
+    app.setAppUserModelId(notificationAppId);
+    app.setToastActivatorCLSID('{DDA2B0C2-2485-46F1-A857-401C56E9424A}');
+}
 
 let window: BrowserWindow;
 let root: string;
@@ -33,7 +38,7 @@ function notificationFailed() {
 }
 function showNotice(notice: CompletionNotice): void {
     if (!Notification.isSupported()) throw Error('Desktop notifications are unavailable in this session.');
-    const notification = new Notification({ title: notice.title, body: notice.body, icon });
+    const notification = new Notification({ title: notice.title === appName ? appName : `${appName} · ${notice.title}`, body: notice.body, icon });
     notification.on('failed', notificationFailed);
     notification.on('click', () => {
         if (!window || window.isDestroyed()) return;
@@ -52,12 +57,12 @@ async function configureNotifications(enabled?: boolean) {
     else if (enabled) {
         try {
             if (process.platform === 'win32') {
-                app.setAppUserModelId(notificationAppId); app.setToastActivatorCLSID('{DDA2B0C2-2485-46F1-A857-401C56E9424A}');
                 const directory = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', appName);
                 await mkdir(directory, { recursive: true });
                 if (generation !== notificationGeneration) return notificationStatus();
                 const written = shell.writeShortcutLink(path.join(directory, `${appName}.lnk`), 'create', { target: process.execPath, args: `"${path.resolve(__dirname, '../..')}"`, cwd: root, description: appName, icon, iconIndex: 0, appUserModelId: notificationAppId, toastActivatorClsid: app.toastActivatorCLSID });
                 if (!written) throw Error('Could not register the Start menu entry.');
+                await registerNotificationIdentity(notificationAppId, appName, path.resolve(__dirname, '../../assets/icon.png'), app.toastActivatorCLSID);
             }
             if (generation === notificationGeneration) notifications.enabled = true;
         } catch { if (generation === notificationGeneration) notificationError = 'Desktop notifications could not be enabled. Check notification permissions and try again.'; }
@@ -91,12 +96,12 @@ app.whenReady().then(async () => {
     handle('project:initialize', (config?: ProjectConfig) => save(() => initializeProject(root, config)));
     handle('config:save', (config: ProjectConfig, revision: string) => save(() => saveConfig(root, config, revision)));
     handle('categories:save', (categories: Category[], revision: string) => save(() => saveCategories(root, categories, revision)));
-    handle('run:preview', async (options: RunOptions) => commandPreview(await validateRun(root, options), (await loadProject(root)).config));
+    handle('run:preview', async (options: RunOptions) => { const project = await loadProject(root); return commandPreview(await validateRun(root, options, project.config, project.specs), project.config, undefined, project.cypressVersion); });
     handle('run:start', (options: RunOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runs.enqueue(options); });
     handle('matrix:preview', async (options: MatrixOptions) => {
         const combinations = matrixRuns(options), project = await loadProject(root);
         const validated = await Promise.all(combinations.map(option => validateRun(root, option, project.config, project.specs)));
-        return validated.map(option => commandPreview(option, project.config)).join('\n');
+        return validated.map(option => commandPreview(option, project.config, undefined, project.cypressVersion)).join('\n');
     });
     handle('matrix:start', (options: MatrixOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runs.enqueueMatrix(options); });
     handle('run:rerun', (id: string) => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerun(id); });
@@ -110,6 +115,7 @@ app.whenReady().then(async () => {
     handle('run:list', () => runs.list());
     handle('run:copy-output', async (id: string) => { await clipboard.writeText(await runs.copyText(id)); });
     handle('run:state', (id: string) => runs.get(id));
+    handle('run:open-log-location', (id: string) => { const state = runs.get(id); if (!state.logPath || state.logError) throw Error(state.logError ?? 'There is no saved log to reveal yet.'); shell.showItemInFolder(state.logPath); });
     handle('run:open-log', async (id: string) => {
         const state = runs.get(id);
         if (['queued', 'running', 'stopping'].includes(state.status) || !state.logPath || state.logError) throw Error(state.logError ?? 'Finish the run before opening its full log.');

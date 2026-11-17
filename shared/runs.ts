@@ -6,7 +6,7 @@ export function matrixRuns(input: MatrixOptions): RunOptions[] {
         || !Array.isArray(input.browsers) || !input.browsers.length || input.browsers.some(browser => typeof browser !== 'string')
         || new Set(input.profiles).size !== input.profiles.length || new Set(input.browsers).size !== input.browsers.length) throw Error('Choose at least one profile and browser, without duplicates.');
     if (input.profiles.length * input.browsers.length > maxOpenRuns) throw Error(`A batch can contain at most ${maxOpenRuns} runs.`);
-    return input.profiles.flatMap(profile => input.browsers.map(browser => ({ specs: input.specs, profile, browser, headed: input.headed })));
+    return input.profiles.flatMap(profile => input.browsers.map(browser => ({ specs: input.specs, profile, browser, headed: input.headed, isolateArtifacts: input.isolateArtifacts })));
 }
 export function validateRunDetails(value: RunDetails): RunDetails {
     if (!value || typeof value.name !== 'string' || !value.name.trim() || value.name.trim().length > 100 || /[\x00\r\n]/.test(value.name)

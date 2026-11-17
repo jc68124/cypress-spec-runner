@@ -43,9 +43,10 @@ export class RunManager {
         if (batch.statuses[entry.job.id] !== entry.job.status) { batch.statuses[entry.job.id] = entry.job.status; this.notifyGroup(batch); }
         entry.job.revision++; this.publish(this.copy(entry.job));
     }
-    private remove(entry: Entry): void {
+    private remove(entry: Entry, cleanup = true): void {
         this.entries.delete(entry.job.id);
         this.publish({ ...this.copy(entry.job), revision: entry.job.revision + 1, removed: true, output: '' });
+        if (cleanup && ![...this.entries.values()].some(other => other.job.batchId === entry.job.batchId)) this.closeBatch(entry.job.batchId);
     }
     update(id: string, value: RunDetails): RunJob {
         const entry = this.entry(id); Object.assign(entry.job, validateRunDetails(value));
@@ -59,11 +60,11 @@ export class RunManager {
     closeBatch(id: string): void {
         const batch = this.group(id);
         if (Object.values(batch.statuses).some(status => pendingRun({ status }))) throw Error('Finish, stop or cancel all runs before closing their group.');
-        for (const entry of this.entries.values()) if (entry.job.batchId === id) this.remove(entry);
+        for (const entry of this.entries.values()) if (entry.job.batchId === id) this.remove(entry, false);
         this.groups.delete(id); this.plans.delete(id); this.publishBatch({ ...structuredClone(batch), revision: batch.revision + 1, removed: true });
     }
     async enqueue(input: RunOptions): Promise<RunJob> {
-        const result = await this.enqueueMatrix({ specs: input?.specs, profiles: [input?.profile], browsers: [input?.browser], headed: input?.headed });
+        const result = await this.enqueueMatrix({ specs: input?.specs, profiles: [input?.profile], browsers: [input?.browser], headed: input?.headed, isolateArtifacts: input?.isolateArtifacts });
         return result.runs[0];
     }
     async enqueueMatrix(input: MatrixOptions): Promise<MatrixResult> {
@@ -115,9 +116,9 @@ export class RunManager {
                 });
                 entry = { config, options: structuredClone(options), runner, job: {
                     id, revision: 0, number: this.nextNumber++, batchId: batch.id, name: `${profile.name.replace(/[\x00\r\n]/g, ' ').slice(0, 85)} · ${options.browser}`, notes: '',
-                    status: 'queued', profileId: profile.id, profileName: profile.name, browser: options.browser, headed: options.headed, specs: [...options.specs],
+                    status: 'queued', profileId: profile.id, profileName: profile.name, browser: options.browser, headed: options.headed, isolateArtifacts: options.isolateArtifacts !== false, specs: [...options.specs],
                     createdAt: batch.createdAt, startedAt: null, finishedAt: null, waitReason: null, artifactDirectory,
-                    output: '', command: commandPreview(options, config, artifactDirectory), exitCode: null,
+                    output: '', command: commandPreview(options, config, artifactDirectory, project.cypressVersion), exitCode: null,
                     outputTruncated: false, outputStartLine: 0, logPath: null, logError: null,
                 } };
                 if (details?.[index]) Object.assign(entry.job, details[index]);

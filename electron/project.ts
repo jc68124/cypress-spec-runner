@@ -125,6 +125,7 @@ export async function loadProject(directory: string): Promise<Project> {
     }
     return { root, config, configRevision: stored?.revision ?? 'missing', initialized: stored !== null,
         categories: categories ? validateCategories(categories.value).categories : [], revision: categories?.revision ?? 'missing',
+        cypressVersion: createRequire(path.join(root, 'package.json'))('cypress/package.json').version,
         specs, specModifiedTimes: Object.fromEntries(modified), discovery };
 }
 export async function findProject(directories: (string | undefined)[]): Promise<Project | null> {
@@ -207,6 +208,7 @@ export async function initializeProject(root: string, chosenConfig?: ProjectConf
 export async function validateRun(root: string, value: unknown, snapshot?: ProjectConfig, discovered?: string[]): Promise<RunOptions> {
     const options = value as RunOptions;
     const project = snapshot ? { config: validateConfig(snapshot), specs: discovered ?? await discoverSpecs(root, snapshot) } : await loadProject(root);
+    if (options?.isolateArtifacts !== undefined && typeof options.isolateArtifacts !== 'boolean') throw Error('Invalid artifact folder preference.');
     if (!options || !Array.isArray(options.specs) || !options.specs.length || options.specs.some(spec => !literalSpec(spec))) throw Error('Select at least one valid spec file.');
     if (!project.config.profiles.some(profile => profile.id === options.profile) || !availableBrowsers(project.config).includes(options.browser) || typeof options.headed !== 'boolean') throw Error('Invalid profile, browser, or run options.');
     if (options.specs.some(spec => !project.specs.includes(spec))) throw Error('A selected spec no longer exists or does not match the configured patterns. Refresh your specs.');
@@ -241,7 +243,7 @@ function configValues(value: string): Record<string, unknown> {
     }
     return config;
 }
-function argumentsFor(options: RunOptions, config: ProjectConfig, expand: (value: string) => string, artifactDirectory?: string): string[] {
+function argumentsFor(options: RunOptions, config: ProjectConfig, expand: (value: string) => string, artifactDirectory?: string, cypressVersion?: string): string[] {
     const profile = config.profiles.find(profile => profile.id === options.profile);
     if (!profile) throw Error('The selected profile no longer exists.');
     const source = profile.args.map(expand), args: string[] = [];
@@ -254,14 +256,16 @@ function argumentsFor(options: RunOptions, config: ProjectConfig, expand: (value
         } else args.push(source[index]);
     }
     if (profile.baseUrl) overrides.baseUrl = expand(profile.baseUrl);
-    if (artifactDirectory) Object.assign(overrides, {
+    if (artifactDirectory && options.isolateArtifacts !== false) Object.assign(overrides, {
         screenshotsFolder: path.join(artifactDirectory, 'screenshots'), videosFolder: path.join(artifactDirectory, 'videos'), downloadsFolder: path.join(artifactDirectory, 'downloads'),
     });
+    const version = /^(\d+)\.(\d+)\./.exec(cypressVersion ?? '');
+    if (version && (Number(version[1]) > 15 || (Number(version[1]) === 15 && Number(version[2]) >= 4)) && !args.some(arg => arg === '--posix-exit-codes' || arg.startsWith('--posix-exit-codes='))) args.push('--posix-exit-codes');
     return ['run', '--e2e', ...(config.configFile ? ['--config-file', config.configFile] : []), ...args,
         ...(Object.keys(overrides).length ? ['--config', JSON.stringify(overrides)] : []), '--browser', options.browser,
         ...(options.headed ? ['--headed'] : []), '--spec', options.specs.join(',')];
 }
-export function runArguments(options: RunOptions, config: ProjectConfig, environment: NodeJS.ProcessEnv = process.env, artifactDirectory?: string): string[] {
+export function runArguments(options: RunOptions, config: ProjectConfig, environment: NodeJS.ProcessEnv = process.env, artifactDirectory?: string, cypressVersion?: string): string[] {
     const expand = (value: string) => value.replace(/\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (_, key: string) => {
         if (environment[key] === undefined) throw Error(`Environment variable ${key} is missing. Set it locally before running.`);
         return environment[key]!;
@@ -269,9 +273,9 @@ export function runArguments(options: RunOptions, config: ProjectConfig, environ
     const profile = config.profiles.find(profile => profile.id === options.profile);
     const baseUrl = profile?.baseUrl ? expand(profile.baseUrl) : '';
     if (baseUrl && !/^https?:\/\//i.test(baseUrl)) throw Error('Base URL must start with http:// or https://.');
-    return argumentsFor(options, config, expand, artifactDirectory);
+    return argumentsFor(options, config, expand, artifactDirectory, cypressVersion);
 }
-export function commandPreview(options: RunOptions, config: ProjectConfig, artifactDirectory?: string): string {
+export function commandPreview(options: RunOptions, config: ProjectConfig, artifactDirectory?: string, cypressVersion?: string): string {
     // Keep environment references as references; previews never expand local secret values.
-    return 'cypress ' + argumentsFor(options, config, value => value, artifactDirectory).map(arg => JSON.stringify(arg)).join(' ');
+    return 'cypress ' + argumentsFor(options, config, value => value, artifactDirectory, cypressVersion).map(arg => JSON.stringify(arg)).join(' ');
 }

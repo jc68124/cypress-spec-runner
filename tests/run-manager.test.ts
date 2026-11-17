@@ -97,10 +97,12 @@ test('queued cancellation never spawns a process and completed tabs can close in
     assert.throws(() => manager.close(first.id), /Stop or cancel/);
     await manager.stop(queued.id);
     assert.throws(() => manager.get(queued.id), /no longer exists/);
-    assert.equal(manager.batches().find(batch => batch.id === queued.batchId)!.statuses[queued.id], 'cancelled');
+    assert.ok(!manager.batches().some(batch => batch.id === queued.batchId));
     await assert.rejects(access(queued.artifactDirectory));
     assert.throws(() => manager.get(queued.id), /no longer exists/);
     assert.equal(manager.get(first.id).status, 'running');
+    await manager.stop(first.id); manager.close(first.id);
+    assert.equal(manager.list().length, 0); assert.equal(manager.batches().length, 0);
     await assert.rejects(manager.stop('unknown'), /no longer exists/);
 });
 test('startup failure releases capacity for the next eligible job', async t => {
@@ -122,7 +124,7 @@ test('shutdown cancels queued runs, stops every active process, and rejects an i
     assert.equal(manager.active, false);
     assert.ok(manager.list().every(run => !pendingRun(run)));
     assert.equal(manager.list().filter(run => run.status === 'cancelled').length, 0);
-    assert.equal(manager.batches().flatMap(batch => Object.values(batch.statuses)).filter(status => status === 'cancelled').length, 1);
+    assert.ok(manager.batches().every(batch => manager.list().some(run => run.batchId === batch.id)));
 });
 test('retained tabs and queued submissions have a fixed memory bound until a completed tab is closed', async t => {
     const { manager } = await setup(t, config => { config.maxConcurrentRuns = 1; });
@@ -234,4 +236,24 @@ test('rerun failed keeps exact target pairs and labels even after original faile
     const all = await manager.rerunBatch(original.batch.id, 'all');
     assert.equal(all.runs.length, 4);
     assert.equal(Object.values(manager.batches().find(batch => batch.id === original.batch.id)!.statuses).filter(status => status === 'failed').length, 2);
+});
+
+test('artifact isolation can be disabled per matrix and survives queued execution and reruns', async t => {
+    const { manager } = await setup(t, config => { config.maxConcurrentRuns = 1; config.profiles[0].args = ['--config', 'video=true,downloadsFolder=custom-downloads']; });
+    const result = await manager.enqueueMatrix({ specs: options.specs, profiles: ['a'], browsers: ['chrome', 'electron'], headed: false, isolateArtifacts: false });
+    for (const initial of result.runs) {
+        await until(() => !!manager.get(initial.id).output);
+        const job = manager.get(initial.id), args = JSON.parse(job.output).args;
+        const overrides = JSON.parse(args[args.indexOf('--config') + 1]);
+        assert.equal(job.isolateArtifacts, false);
+        assert.deepEqual(overrides, { video: true, downloadsFolder: 'custom-downloads' });
+        assert.ok(args.includes('--posix-exit-codes'));
+        assert.match(job.command, /--posix-exit-codes/);
+        assert.doesNotMatch(job.command, /screenshotsFolder|videosFolder/);
+        await manager.stop(job.id);
+        assert.equal(await readFile(job.logPath!, 'utf8'), job.output);
+    }
+    const repeat = await manager.rerunBatch(result.batch.id, 'all');
+    assert.ok(repeat.runs.every(run => run.isolateArtifacts === false));
+    assert.notEqual(repeat.runs[0].artifactDirectory, result.runs[0].artifactDirectory);
 });
