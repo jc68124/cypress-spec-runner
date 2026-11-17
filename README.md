@@ -16,15 +16,17 @@ With pnpm, use `pnpm add -D @jc68124/cypress-spec-runner`, `pnpm exec cypress-sp
 
 The initializer creates project configuration, categories based on spec folders, a launch script, and Git ignore entries. Commit the files listed by the initializer. Other contributors only need to install the project's dependencies and supply their usual local environment values. The published package includes the built interface; consuming projects do not need frontend build tools. Electron downloads its runtime on first launch if necessary.
 
-Open **Settings** to configure project names, run profiles, base URLs, local environment files, available browsers, run limits, shared environment groups, and extra Cypress arguments. Spec patterns are read automatically from the Cypress config; manual discovery overrides are inside a collapsed advanced section. Shared saves show a reminder listing the files to commit. Browser choices, selections, and output preferences are stored locally per checkout.
+Open **Settings** to configure project names, run profiles, base URLs, local environment files, available and custom browsers, run limits, shared environment groups, and extra Cypress arguments. Spec patterns are read automatically from the Cypress config; manual discovery overrides are inside a collapsed advanced section. Shared saves show a reminder listing the files to commit. Browser choices, selections, and output preferences are stored locally per checkout.
 
 ## Run tests
 
 - Select categories or individual specs; overlapping categories count a file once.
 - Use **View specs** to adjust a run selection, or **Edit category** to change shared assignments.
 - Use **Configure run** to select profiles, browsers, whether to show browser windows, and whether to use separate artifact folders (on by default). Choose **Repeat all specs on every target** for full coverage, or **Split specs across targets** to run each file once across the selected targets; the sidebar shows the total before you start.
+- Save named **Presets** locally or in the shared project configuration; loading one prepares the next run without starting it.
 - The **Runs** view groups each submission with its targets and result counts. Rename groups, edit individual run names/notes, and switch between outputs. **Stop run** affects only the selected run; **Cancel queued run** removes its row immediately. Closing or cancelling the final row also removes its group; saved logs remain on disk.
 - Settings defaults to two simultaneous runs overall and one per profile. Shared groups let profiles targeting the same environment share a limit. Waiting runs start automatically when capacity is available.
+- Open **Test results** for actual test totals, retries, failed specs and screenshot/video shortcuts. **History** retains the latest 100 finished runs across restarts with links to their logs.
 - An amber dot on **Refresh specs** means spec files or discovery settings changed. Refresh when runs have finished to update the list.
 - Each run keeps the latest 500,000 characters in its output view. **Run command and artifacts** opens secondary details in a dialog. Complete plain-text logs are saved in `spec-runner-logs/`; use **Open log** after a run finishes or stops to open the saved file in your default application, or **Open log location** to reveal it in your file manager.
 - **Copy output** copies the complete plain-text log so far, including output beyond the visible history, up to 20 MiB. Larger logs remain available as files. Scrolling up pauses **Follow output**; scrolling back to the bottom or enabling it again resumes following.

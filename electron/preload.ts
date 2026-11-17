@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { NotificationStatus, RunnerAPI, RunBatch, RunJob } from '../shared/types';
 const api: RunnerAPI = {
+    saveLocal: state => ipcRenderer.invoke('local:save', state),
+    chooseBrowser: () => ipcRenderer.invoke('browser:choose'),
+    openArtifact: (id, filename, historical) => ipcRenderer.invoke('run:artifact', id, filename, historical),
+    history: () => ipcRenderer.invoke('history:list'),
+    historyDetail: id => ipcRenderer.invoke('history:detail', id),
+    historyLog: (id, location) => ipcRenderer.invoke('history:log', id, location),
+    forgetHistory: id => ipcRenderer.invoke('history:forget', id),
+    rerunHistory: id => ipcRenderer.invoke('history:rerun', id),
     notifications: enabled => ipcRenderer.invoke('notifications:configure', enabled),
     testNotification: () => ipcRenderer.invoke('notifications:test'),
     onNotificationStatus: listener => { const handler = (_event: unknown, status: NotificationStatus) => listener(status); ipcRenderer.on('notifications:status', handler); return () => { ipcRenderer.removeListener('notifications:status', handler); }; },

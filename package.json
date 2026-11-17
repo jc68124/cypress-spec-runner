@@ -26,7 +26,7 @@
     "scripts": {
         "check": "tsc6 -p tsconfig.json && tsc6 -p tsconfig.electron.json --noEmit",
         "build": "pnpm check && tsc6 -p tsconfig.electron.json && vite build",
-        "test": "tsc6 -p tsconfig.electron.json && node --test out/tests/*.test.js",
+        "test": "tsc6 -p tsconfig.electron.json && node --test --test-timeout=60000 out/tests/*.test.js",
         "prepack": "pnpm build",
         "smoke": "node scripts/package-smoke.cjs",
         "changeset": "changeset",

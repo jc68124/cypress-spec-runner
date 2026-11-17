@@ -1,0 +1,37 @@
+const {app,BrowserWindow,shell,dialog,nativeImage,clipboard}=require('electron');
+const fs=require('node:fs'),path=require('node:path');
+const installed=process.env.SPEC_RUNNER_PACKAGE,root=process.env.SPEC_RUNNER_PROJECT;
+const second=process.env.SPEC_RUNNER_SMOKE_PHASE==='history';
+const icon=nativeImage.createFromPath(path.join(installed,'assets',process.platform==='win32'?'icon.ico':'icon.png'));
+if(icon.isEmpty()||icon.getSize().width<16)throw Error('Packaged icon missing');
+const openedLogs=[],revealedLogs=[],openedArtifacts=[];
+shell.showItemInFolder=file=>revealedLogs.push(file);
+shell.openPath=async file=>{if(file.endsWith('.log')){openedLogs.push(file);return !second&&openedLogs.length===1?'No default application is configured.':'';}openedArtifacts.push(file);return '';};
+dialog.showSaveDialog=async()=>{throw Error('Saved logs must open without a save dialog');};
+dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path.join(root,'portable browser')]});
+dialog.showErrorBox=(title,message)=>{console.error(title,message);app.exit(1);};
+const original=BrowserWindow.prototype.loadFile;
+BrowserWindow.prototype.loadFile=async function(...args){
+    const loaded=await original.apply(this,args),win=this;
+    setTimeout(async()=>{
+        try{
+            const execute=name=>win.webContents.executeJavaScript(fs.readFileSync(path.join(root,name),'utf8'));
+            if(second){const value=await execute('package-history-check.cjs');if(!fs.existsSync(value.logPath)||!openedLogs.includes(value.logPath)||!openedArtifacts.length)throw Error('Historical log/artifacts unavailable after restart');console.log('HISTORY_REOPENED:'+JSON.stringify(value));app.exit(0);return;}
+            const result=await execute('package-run-check.cjs');
+            if(app.getName()!=='Cypress Spec Runner')throw Error('Native app name is not friendly');
+            if(openedLogs.length!==2||openedLogs.some(file=>file!==result.logPath)||revealedLogs[0]!==result.logPath||!openedArtifacts.length)throw Error('Log/artifact shortcuts did not use owned paths');
+            if((await clipboard.readText()).replace(/\r\n/g,'\n')!==result.matrix[0].output.replace(/\r\n/g,'\n'))throw Error('Copy output did not use full log');
+            for(let index=0;index<6;index++)fs.writeFileSync(path.join(root,'cypress/e2e/split-'+index+'.cy.ts'),'');
+            let changed=false;
+            for(let index=0;index<150;index++){changed=await win.webContents.executeJavaScript("!!document.querySelector('[aria-label=\"Spec changes detected\"]')");if(changed)break;await new Promise(resolve=>setTimeout(resolve,100));}
+            if(!changed)throw Error('Filesystem edit did not reach the refresh indicator');
+            result.historyCount=await execute('package-split-check.cjs');
+            if(await win.webContents.executeJavaScript("!!document.querySelector('[aria-label=\"Spec changes detected\"]')"))throw Error('Refresh did not clear change indicator');
+            const metadata=fs.readFileSync(path.join(root,'spec-runner-logs',result.id,'run.json'),'utf8');
+            if(metadata.includes('raw_config_secret_do_not_store')||metadata.includes('"command"')||metadata.includes('"output"'))throw Error('History stored raw config, command or output');
+            console.log('PACKAGED_RUN:'+JSON.stringify(result));app.exit(0);
+        }catch(error){console.error(error);app.exit(1);}
+    },30);
+    return loaded;
+};
+require(path.join(installed,'out/electron/main.js'));

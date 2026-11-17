@@ -1,5 +1,16 @@
 export const browsers = ['chrome', 'electron', 'edge', 'firefox'] as const;
-export type Browser = typeof browsers[number];
+export type Browser = string;
+export interface CustomBrowser { id: string; name: string; channel?: string }
+export function browserName(config: ProjectConfig, id: string): string { return config.customBrowsers?.find(browser => browser.id === id)?.name ?? id; }
+export interface RunPreset { id: string; name: string; options: MatrixOptions }
+export interface LocalState { revision: string; browserPaths: Record<string, string>; presets: RunPreset[] }
+export interface TestResult { title: string; state: string; duration: number; attempts: number; error?: string }
+export interface SpecResult { spec: string; passed: number; failed: number; pending: number; skipped: number; duration: number; tests: TestResult[]; screenshots: string[]; video?: string; error?: string }
+export interface RunResults { total: number; passed: number; failed: number; pending: number; skipped: number; duration: number; specs: SpecResult[]; truncated?: boolean; error?: string }
+export interface HistoryEntry { id: string; name: string; groupName: string; profileId: string; profileName: string; browser: string; browserName: string; status: 'passed' | 'failed' | 'stopped'; createdAt: number; finishedAt: number; duration: number; specCount: number; counts?: Pick<RunResults, 'total' | 'passed' | 'failed' | 'pending' | 'skipped'> }
+export interface HistoryDetail extends HistoryEntry { specs: string[]; headed: boolean; isolateArtifacts: boolean; notes: string; logPath: string | null; logError?: string | null; results?: RunResults; resultsError?: string }
+export interface HistoryList { entries: HistoryEntry[]; error?: string }
+
 export interface RunProfile {
     id: string;
     name: string;
@@ -19,6 +30,8 @@ export interface ProjectConfig {
     excludeSpecPattern?: string[];
     envFile: string | null;
     browsers?: Browser[];
+    customBrowsers?: CustomBrowser[];
+    presets?: RunPreset[];
     maxConcurrentRuns?: number;
     concurrencyGroups?: ConcurrencyGroup[];
     profiles: RunProfile[];
@@ -30,6 +43,7 @@ export interface CategoryFile { version: 1; categories: Category[] }
 export interface SpecDiscovery { source: 'cypress' | 'defaults' | 'override'; configFile: string | null; specPattern: string[]; excludeSpecPattern: string[]; warning?: string }
 export interface Project {
     root: string;
+    local?: LocalState;
     config: ProjectConfig;
     configRevision: string;
     specs: string[];
@@ -41,7 +55,7 @@ export interface Project {
     initialized: boolean;
 }
 export interface SaveResult { project: Project; changedFiles: string[] }
-export interface RunOptions { specs: string[]; profile: string; browser: Browser; headed: boolean; isolateArtifacts?: boolean }
+export interface RunOptions { specs: string[]; profile: string; browser: Browser; headed: boolean; isolateArtifacts?: boolean; browserTarget?: string }
 export type ExecutionMode = 'repeat' | 'split';
 export interface MatrixOptions { specs: string[]; profiles: string[]; browsers: Browser[]; headed: boolean; isolateArtifacts?: boolean; executionMode?: ExecutionMode }
 export interface RunDetails { name: string; notes: string }
@@ -52,6 +66,7 @@ export interface RunBatch {
     createdAt: number;
     profiles: { id: string; name: string }[];
     browsers: Browser[];
+    browserNames?: Record<string, string>;
     specCount: number;
     executionMode?: ExecutionMode;
     statuses: Record<string, RunJob['status']>;
@@ -68,6 +83,8 @@ export interface RunState {
     outputStartLine: number;
     logPath: string | null;
     logError: string | null;
+    results?: RunResults;
+    resultsError?: string;
 }
 export interface RunJob extends Omit<RunState, 'status'> {
     id: string;
@@ -81,6 +98,7 @@ export interface RunJob extends Omit<RunState, 'status'> {
     profileId: string;
     profileName: string;
     browser: Browser;
+    browserName?: string;
     headed: boolean;
     isolateArtifacts?: boolean;
     specs: string[];
@@ -93,6 +111,14 @@ export interface RunJob extends Omit<RunState, 'status'> {
 export interface NotificationStatus { enabled: boolean; supported: boolean; error?: string }
 export interface RunnerAPI {
     project(): Promise<Project>;
+    saveLocal(state: LocalState): Promise<{ state: LocalState; changedFiles: string[] }>;
+    chooseBrowser(): Promise<string | null>;
+    openArtifact(id: string, filename: string, historical?: boolean): Promise<void>;
+    history(): Promise<HistoryList>;
+    historyDetail(id: string): Promise<HistoryDetail>;
+    historyLog(id: string, location?: boolean): Promise<void>;
+    forgetHistory(id?: string): Promise<void>;
+    rerunHistory(id: string): Promise<MatrixResult>;
     notifications(enabled?: boolean): Promise<NotificationStatus>;
     testNotification(): Promise<void>;
     onNotificationStatus(listener: (status: NotificationStatus) => void): () => void;

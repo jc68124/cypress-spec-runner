@@ -52,11 +52,10 @@ export class Runner {
         this.starting = new Promise<void>(resolve => { ready = resolve; });
         this.stopped = false;
         try {
-            const options = await validateRun(root, input, snapshot);
+            const options = await validateRun(root, input, snapshot, undefined, snapshot ? input.browserTarget : undefined);
             const requireFromProject = createRequire(path.join(root, 'package.json'));
-            const packageFile = requireFromProject.resolve('cypress/package.json');
             const cypressPackage = requireFromProject('cypress/package.json') as { version: string; bin: { cypress: string } };
-            const cli = path.resolve(path.dirname(packageFile), cypressPackage.bin.cypress);
+            const cli = path.join(__dirname, 'cypress-child.js');
             const config = snapshot ?? (await loadProject(root)).config;
             const env = await runEnvironment(root, config, options.profile, artifacts ? { SPEC_RUNNER_RUN_ID: artifacts.id, SPEC_RUNNER_ARTIFACTS_DIR: artifacts.directory } : {});
             const args = runArguments(options, config, env, artifacts?.directory, cypressPackage.version);
@@ -76,9 +75,13 @@ export class Runner {
                 shell: false,
                 windowsHide: true,
                 detached: process.platform !== 'win32',
-                stdio: ['ignore', 'pipe', 'pipe'],
+                stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
             });
             this.child = child;
+            child.on('message', (message: any) => {
+                if (message?.type === 'results' && message.summary && typeof message.summary.total === 'number') this.current.results = message.summary;
+                else if (message?.type === 'results-unavailable' && typeof message.message === 'string') this.current.resultsError = message.message.slice(0, 2000);
+            });
             child.stdout?.setEncoding('utf8').on('data', (data: string) => this.append(data));
             child.stderr?.setEncoding('utf8').on('data', (data: string) => this.append(data));
             child.on('error', (error: NodeJS.ErrnoException) => {
@@ -109,6 +112,7 @@ export class Runner {
         this.timer = undefined;
         await this.log?.finish();
         this.log = null;
+        this.current.resultsError ??= !this.current.results ? (this.stopped ? 'Run stopped before structured results were available.' : 'Cypress exited without completed structured results. See the output or log.') : undefined;
         this.current.exitCode = code;
         this.current.status = this.stopped ? 'stopped' : code === 0 ? 'passed' : 'failed';
         this.child = null;

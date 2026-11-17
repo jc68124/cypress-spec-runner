@@ -4,6 +4,7 @@ import { Runner } from './runner';
 import { PlainText } from './run-log';
 import { commandPreview, loadProject, validateRun } from './project';
 import type { ExecutionMode, MatrixOptions, MatrixResult, ProjectConfig, RunBatch, RunDetails, RunJob, RunOptions } from '../shared/types';
+import { browserName } from '../shared/types';
 import { matrixRuns, validateMatrixTargets, maxOpenBatches, maxOpenRuns, pendingRun, validateRunDetails } from '../shared/runs';
 
 type Entry = { job: RunJob; runner: Runner; config: ProjectConfig; options: RunOptions };
@@ -103,7 +104,7 @@ export class RunManager {
             }
             const batch: RunBatch = { id: randomUUID(), revision: 0, name: (name ?? `${executionMode === 'split' ? 'Split' : validated.length > 1 ? 'Matrix' : 'Run'} #${this.nextBatchNumber++}`).slice(0, 100),
                 createdAt: Date.now(), profiles: [...new Set(validated.map(options => options.profile))].map(id => ({ id, name: config.profiles.find(profile => profile.id === id)!.name })),
-                browsers: [...new Set(validated.map(options => options.browser))], specCount: new Set(validated.flatMap(options => options.specs)).size, executionMode, statuses: {}, targets: [] };
+                browsers: [...new Set(validated.map(options => options.browser))], browserNames: Object.fromEntries(validated.map(options => [options.browser, browserName(config, options.browser)])), specCount: new Set(validated.flatMap(options => options.specs)).size, executionMode, statuses: {}, targets: [] };
             const entries = validated.map((options, index) => {
                 const id = randomUUID(), artifactDirectory = path.join(this.root, 'spec-runner-logs', id);
                 const profile = config.profiles.find(profile => profile.id === options.profile)!;
@@ -116,8 +117,8 @@ export class RunManager {
                     if (!runner.active) this.schedule();
                 });
                 entry = { config, options: structuredClone(options), runner, job: {
-                    id, revision: 0, number: this.nextNumber++, batchId: batch.id, name: `${profile.name.replace(/[\x00\r\n]/g, ' ').slice(0, 85)} · ${options.browser}`, notes: '',
-                    status: 'queued', profileId: profile.id, profileName: profile.name, browser: options.browser, headed: options.headed, isolateArtifacts: options.isolateArtifacts !== false, specs: [...options.specs],
+                    id, revision: 0, number: this.nextNumber++, batchId: batch.id, name: `${profile.name.replace(/[\x00\r\n]/g, ' ').slice(0, 85)} · ${browserName(config, options.browser)}`.slice(0, 100), notes: '',
+                    status: 'queued', profileId: profile.id, profileName: profile.name, browser: options.browser, browserName: browserName(config, options.browser), headed: options.headed, isolateArtifacts: options.isolateArtifacts !== false, specs: [...options.specs],
                     createdAt: batch.createdAt, startedAt: null, finishedAt: null, waitReason: null, artifactDirectory,
                     output: '', command: commandPreview(options, config, artifactDirectory, project.cypressVersion), exitCode: null,
                     outputTruncated: false, outputStartLine: 0, logPath: null, logError: null,
@@ -158,7 +159,7 @@ export class RunManager {
             // Reserve capacity synchronously, before asynchronous process startup.
             entry.job.status = 'running'; entry.job.startedAt = Date.now(); entry.job.waitReason = null; this.notify(entry);
             void entry.runner.run(this.root, entry.options, entry.config, { id: entry.job.id, directory: entry.job.artifactDirectory }).catch(error => {
-                Object.assign(entry.job, { status: 'failed', output: String(error.message) + '\n', finishedAt: Date.now() });
+                Object.assign(entry.job, { status: 'failed', output: String(error.message) + '\n', resultsError: String(error.message), finishedAt: Date.now() });
                 this.notify(entry); this.schedule();
             });
         }

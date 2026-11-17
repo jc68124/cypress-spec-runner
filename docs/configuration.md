@@ -50,9 +50,19 @@ Only variable references and non-sensitive values belong in shared configuration
 
 ## Available browsers
 
-Choose the project's browser list in **Settings → Available browsers**, then save and commit `spec-runner.config.json`. The optional `browsers` field accepts `chrome`, `electron`, `edge`, and `firefox`; keep at least one and do not repeat entries. Existing configurations without this field continue to allow all four.
+Choose the project's browser list in **Settings → Available browsers**, then save and commit `spec-runner.config.json`. The optional `browsers` field accepts `chrome`, `electron`, `edge`, `firefox`, and IDs from `customBrowsers`; keep at least one and do not repeat entries. Existing configurations without this field continue to allow all four.
 
-Run controls and the personal preferred-browser setting show only the saved project choices. If a previously selected browser is removed, the runner selects the first enabled browser. Cypress uses the selected browser's local installation; configure the list to match what your team supports. Custom executable paths and release channels are not supported yet; support for these is planned as a separate browser-configuration change.
+Run controls and the personal preferred-browser setting show only the saved project choices. If a previously selected browser is removed, the runner selects the first enabled browser. Cypress uses the selected browser's local installation; configure the list to match what your team supports. Use **Add custom browser** for a friendly name and either a Cypress browser/channel (for example `chromium` or `chrome:beta`) or a local executable binding. Shared entries go in `customBrowsers`:
+
+```json
+"browsers": ["electron", "beta", "portable"],
+"customBrowsers": [
+    { "id": "beta", "name": "Chrome Beta", "channel": "chrome:beta" },
+    { "id": "portable", "name": "Portable Chromium" }
+]
+```
+
+Save the shared entry first. For an entry without `channel`, open **Personal preferences → Local browser executables**, browse to the installed browser, and save its path. Absolute paths stay in the ignored `.spec-runner/local.json` file and can differ between computers. Browser/channel names are passed to Cypress without a shell; Cypress decides which installed browser can launch. On macOS an `.app` bundle can also be selected. Names remain visible in run lists, matrix cells, results and history; the command preview shows the launch target. Queued runs keep their captured binding; reruns resolve the current binding. Missing executables fail validation with a Settings hint before a batch starts.
 
 ## Concurrent runs and environment limits
 
@@ -139,4 +149,8 @@ Notifications use the friendly **Cypress Spec Runner** name. On Windows, the pro
 
 ## Exit codes and result totals
 
-Group totals count **runs**, not individual Cypress tests. The runner does not infer a failed-test count from a process exit code: startup/configuration failures can also return `1`, and legacy codes above 255 can wrap to zero. For Cypress 15.4.0 and newer, the runner automatically adds `--posix-exit-codes` unless the profile already sets that flag explicitly. This avoids legacy count wrapping while leaving older Cypress versions compatible. Older versions (or explicit opt-out) retain Cypress's legacy exit-code limitations. Exact test totals require Cypress's Module API or structured reporter results. See [Cypress CLI exit codes](https://docs.cypress.io/app/references/command-line#Exit-code).
+The runner launches the consuming project's Cypress through its Module API in a separate Node process, parsing arguments with Cypress's own `cli.parseRunArguments`. Existing configuration, reporters and reporter options are retained; no setup hook or additional reporter installation is needed. The adapter returns process success/failure while structured results provide actual test totals, durations, final test states and retry attempts. Startup/configuration failures and stopped runs may have no completed test summary and explain this in **Test results**; they are never reported as zero failed tests.
+
+CLI-only Cypress distributions without a Module API entry still run through their CLI and show results as unavailable. Version-aware POSIX flags remain in CLI arguments for compatible versions. Process exit codes are never interpreted as failed-test counts. See [Cypress Module API](https://docs.cypress.io/app/references/module-api).
+
+For result dialogs, saved presets and persistent run history, see [Results, presets and history](results-presets-history.md).
