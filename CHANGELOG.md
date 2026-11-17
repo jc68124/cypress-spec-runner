@@ -1,5 +1,11 @@
 # @jc68124/cypress-spec-runner
 
+## 0.9.0
+
+### Minor Changes
+
+- 9bdeafc: Show a live spec-progress view by default, keep raw output on a separate tab, and rerun only failed spec files on their original profile/browser targets from runs, groups and history.
+
 ## 0.8.1
 
 ### Patch Changes
