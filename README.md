@@ -23,7 +23,7 @@ Open **Settings** to configure project names, run profiles, base URLs, local env
 - Select categories or individual specs; overlapping categories count a file once.
 - Use **View specs** to adjust a run selection, or **Edit category** to change shared assignments.
 - Use **Configure run** to select profiles, browsers, whether to show browser windows, and whether to use separate artifact folders (on by default). Choose **Repeat all specs on every target** for full coverage, or **Split specs across targets** to run each file once across the selected targets; the sidebar shows the total before you start.
-- Save named **Presets** locally or in the shared project configuration; loading one prepares the next run without starting it.
+- Use the **Presets** screen to search and manage named selections saved locally or in the shared project configuration; loading one prepares the next run without starting it.
 - The **Runs** view groups each submission with its targets and result counts. Rename groups, edit individual run names/notes, and switch between outputs. **Stop run** affects only the selected run; **Cancel queued run** removes its row immediately. Closing or cancelling the final row also removes its group; saved logs remain on disk.
 - Settings defaults to two simultaneous runs overall and one per profile. Shared groups let profiles targeting the same environment share a limit. Waiting runs start automatically when capacity is available.
 - Open **Test results** for actual test totals, retries, failed specs and screenshot/video shortcuts. **History** retains the latest 100 finished runs across restarts with links to their logs.

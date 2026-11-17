@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from 'react';
+import { Spinner, useButtonAction, type ActionButtonProps } from './ui';
 const paths = {
     edit: 'm15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15Z',
     search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
@@ -12,6 +12,10 @@ const paths = {
     menu: 'M4 6h16M4 12h16M4 18h16',
     more: 'M5 12h.01M12 12h.01M19 12h.01',
 };
-export function IconButton({ icon, label, className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { icon: keyof typeof paths; label: string }) {
-    return <button type="button" aria-label={label} title={label} {...props} className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-white/10 hover:text-white disabled:opacity-40 ${className}`}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[icon]} /></svg></button>;
+export function IconButton({ icon, label, className = '', onClick, successLabel, disabled, ...props }: ActionButtonProps & { icon: keyof typeof paths; label: string }) {
+    const action = useButtonAction(onClick, successLabel);
+    return <button type="button" {...props} aria-label={action.error ? `Failed: ${action.error}` : action.feedback || label} title={action.error || action.feedback || props.title || label} disabled={disabled || action.busy} aria-busy={action.busy || undefined} onClick={action.click} className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-white/10 hover:text-white disabled:opacity-40 ${className}`}>
+        {action.busy ? <Spinner /> : <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={action.error ? 'm6 6 12 12M6 18 18 6' : action.feedback ? 'm5 12 4 4L19 6' : paths[icon]} /></svg>}
+        {(action.error || action.feedback) && <span className="sr-only" role={action.error ? 'alert' : 'status'}>{action.error || action.feedback}</span>}
+    </button>;
 }

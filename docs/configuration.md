@@ -103,7 +103,7 @@ Use **View matrix** on a run group for a profile × browser table. Select an ava
 
 ### Rerunning results
 
-Once a run finishes, **Rerun run** creates a fresh run for the same specs, profile and browser. **Rerun group** repeats every original combination, including cancelled combinations; **Rerun failed** repeats only failed combinations, even if their output rows were closed. Failed pairs are preserved exactly rather than expanded into another full matrix. Names and notes carry forward, current shared project settings are used, and original results remain unchanged. Split-mode reruns retain the exact spec assignment for every selected target, including targets whose rows were closed; they never redistribute the full selection. The original artifact-isolation preference is kept, and logs always use a new run folder. Removed profiles or specs must be fixed before the whole rerun batch can start.
+Once a run finishes, **Rerun** creates a fresh run for the same specs, profile and browser. **Rerun group** repeats every original combination, including cancelled combinations; **Rerun failed** repeats only failed combinations, even if their output rows were closed. Failed pairs are preserved exactly rather than expanded into another full matrix. Names and notes carry forward, current shared project settings are used, and original results remain unchanged. Split-mode reruns retain the exact spec assignment for every selected target, including targets whose rows were closed; they never redistribute the full selection. The original artifact-isolation preference is kept, and logs always use a new run folder. Removed profiles or specs must be fixed before the whole rerun batch can start.
 
 ### Run files and custom reporters
 

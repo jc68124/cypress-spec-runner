@@ -5,7 +5,13 @@
 :root { color-scheme: dark; font-family: var(--font-sans); background: #09090b; color: #e4e4e7; }
 body { margin: 0; min-width: 960px; }
 button { cursor: pointer; }
+button { transition: background-color .12s, box-shadow .12s, filter .12s; }
+button:active:enabled { filter: brightness(1.3); box-shadow: inset 0 0 0 1px #a5b4fc80; }
 button:disabled { cursor: not-allowed; opacity: .45; }
+button[aria-busy=true] { cursor: wait; opacity: .8; }
+.button-spinner { display: inline-block; width: .85rem; height: .85rem; flex-shrink: 0; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: button-spin .7s linear infinite; }
+@keyframes button-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { button { transition: none; } .button-spinner { animation: none; border-style: dotted; } }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #a5b4fc; outline-offset: 3px; }
 input:not([type=checkbox]):not([type=radio]), select, textarea { width: 100%; min-width: 0; border: 1px solid #ffffff26; border-radius: .5rem; background: #18181b; padding: .55rem .7rem; color: #f4f4f5; font: inherit; font-size: .875rem; }
 input[type=checkbox] { accent-color: #818cf8; width: 1rem; height: 1rem; flex-shrink: 0; margin: .15rem 0 0; cursor: pointer; }
