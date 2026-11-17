@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { indentSelection, parseEditorJson, type JsonKind } from '../shared/json-editor';
+import { indentSelection, insertNewline, parseEditorJson, type JsonKind } from '../shared/json-editor';
 import { Button } from './ui';
 export function JsonEditor({ id, name, kind, value, disabled, onChange }: { id: string; name: string; kind: JsonKind; value: string; disabled: boolean; onChange: (value: string) => void }) {
     const input = useRef<HTMLTextAreaElement>(null), leaveOnTab = useRef(false);
@@ -12,6 +12,14 @@ export function JsonEditor({ id, name, kind, value, disabled, onChange }: { id: 
     }
     return <div className="space-y-2"><div className="flex items-center justify-between gap-3"><span className="text-xs text-zinc-500">{kind === 'args' ? 'JSON array' : 'JSON object'} · 4-space indentation</span><Button small aria-label={`Format ${name}`} disabled={disabled} onClick={format}>Format JSON</Button></div>
         <textarea ref={input} id={id} rows={6} wrap="off" disabled={disabled} spellCheck={false} autoCapitalize="off" autoCorrect="off" aria-invalid={!!error} aria-describedby={`${id}-hint${error ? ` ${id}-error` : ''}`} aria-keyshortcuts="Control+Shift+F Meta+Shift+F" value={value} onBlur={() => { leaveOnTab.current = false; format(); }} onChange={event => onChange(event.target.value)} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '.8rem', lineHeight: 1.6, tabSize: 4, ...(error ? { borderColor: '#f87171' } : {}) }} onKeyDown={event => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+                event.preventDefault(); leaveOnTab.current = false;
+                const element = event.currentTarget, edited = insertNewline(element.value, element.selectionStart, element.selectionEnd);
+                onChange(edited.value);
+                requestAnimationFrame(() => { if (input.current?.value === edited.value) input.current.setSelectionRange(edited.start, edited.end); });
+                return;
+            }
             if (event.key === 'Escape') { leaveOnTab.current = true; event.stopPropagation(); return; }
             if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); format(); return; }
             if (event.key !== 'Tab') { leaveOnTab.current = false; return; }
@@ -22,7 +30,7 @@ export function JsonEditor({ id, name, kind, value, disabled, onChange }: { id: 
             onChange(edited.value);
             requestAnimationFrame(() => { if (input.current?.value === edited.value) input.current.setSelectionRange(edited.start, edited.end); });
         }} />
-        <p id={`${id}-hint`} className="text-xs leading-5 text-zinc-500">Formats on leaving the field and saving. Tab indents; Shift+Tab outdents. Escape then Tab moves focus. Ctrl/Cmd+Shift+F formats.</p>
+        <p id={`${id}-hint`} className="text-xs leading-5 text-zinc-500">Formats on leaving the field and saving. Enter keeps indentation; JSON containers indent one level. Tab indents; Shift+Tab outdents. Escape then Tab moves focus. Ctrl/Cmd+Shift+F formats.</p>
         {error && <p id={`${id}-error`} role="alert" className="text-xs text-red-300">{error}</p>}
     </div>;
 }

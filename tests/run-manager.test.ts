@@ -257,3 +257,45 @@ test('artifact isolation can be disabled per matrix and survives queued executio
     assert.ok(repeat.runs.every(run => run.isolateArtifacts === false));
     assert.notEqual(repeat.runs[0].artifactDirectory, result.runs[0].artifactDirectory);
 });
+
+test('split runs execute disjoint specs and keep exact partitions through closed rows and every rerun mode', async t => {
+    const { root, manager } = await setup(t);
+    const specs = [...options.specs];
+    for (let index = 0; index < 6; index++) {
+        const spec = `cypress/e2e/features/Part ${index}.cy.ts`;
+        await writeFile(path.join(root, spec), ''); specs.push(spec);
+    }
+    const cli = path.join(root, 'node_modules/cypress/bin/cypress');
+    await writeFile(cli, "const args=process.argv.slice(2);console.log(JSON.stringify(args));setTimeout(()=>{process.exitCode=args[args.indexOf('--browser')+1]==='chrome'?1:0;},100);");
+    const result = await manager.enqueueMatrix({ specs, profiles: ['a', 'b'], browsers: ['chrome', 'electron'], headed: false, executionMode: 'split' });
+    assert.equal(result.batch.executionMode, 'split'); assert.equal(result.batch.specCount, 7);
+    assert.deepEqual(result.runs.map(run => run.status), ['running', 'running', 'queued', 'queued']);
+    const partitions = result.runs.map(run => ({ profile: run.profileId, browser: run.browser, specs: run.specs }));
+    assert.deepEqual(result.runs.flatMap(run => run.specs).sort(), specs.sort());
+    assert.deepEqual(result.batch.targets.map(target => target.specCount), [2, 2, 2, 1]);
+    await until(() => !manager.active);
+    for (const run of result.runs) {
+        const args = JSON.parse(manager.get(run.id).output);
+        assert.deepEqual(args[args.indexOf('--spec') + 1].split(','), run.specs);
+    }
+    const failed = manager.list().filter(run => run.status === 'failed');
+    manager.close(failed[0].id);
+    await writeFile(cli, "console.log(JSON.stringify(process.argv.slice(2)));");
+    const rerun = await manager.rerunBatch(result.batch.id, 'failed');
+    assert.equal(rerun.batch.executionMode, 'split');
+    assert.deepEqual(rerun.runs.map(run => ({ profile: run.profileId, browser: run.browser, specs: run.specs })), partitions.slice(0, 2));
+    await until(() => !manager.active);
+    const single = await manager.rerun(rerun.runs[0].id);
+    assert.deepEqual(single.runs[0].specs, partitions[0].specs);
+    await until(() => !manager.active);
+    const all = await manager.rerunBatch(result.batch.id, 'all');
+    assert.deepEqual(all.runs.map(run => ({ profile: run.profileId, browser: run.browser, specs: run.specs })), partitions);
+    await until(() => !manager.active);
+});
+test('split validation also rejects invalid targets that would receive no specs without starting a partial group', async t => {
+    const { manager } = await setup(t, config => { config.browsers = ['chrome']; });
+    const plan = { specs: options.specs, profiles: ['a', 'missing'], browsers: ['chrome'] as ['chrome'], headed: false, executionMode: 'split' as const };
+    await assert.rejects(manager.enqueueMatrix(plan), /Invalid profile or browser/);
+    await assert.rejects(manager.enqueueMatrix({ ...plan, profiles: ['a'], browsers: ['chrome', 'electron'] }), /Invalid profile or browser/);
+    assert.equal(manager.list().length, 0); assert.equal(manager.batches().length, 0);
+});

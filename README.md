@@ -22,9 +22,10 @@ Open **Settings** to configure project names, run profiles, base URLs, local env
 
 - Select categories or individual specs; overlapping categories count a file once.
 - Use **View specs** to adjust a run selection, or **Edit category** to change shared assignments.
-- Use **Configure run** to select profiles, browsers, whether to show browser windows, and whether to use separate artifact folders (on by default). Every profile/browser combination runs the selected specs separately; the sidebar shows the total before you start.
+- Use **Configure run** to select profiles, browsers, whether to show browser windows, and whether to use separate artifact folders (on by default). Choose **Repeat all specs on every target** for full coverage, or **Split specs across targets** to run each file once across the selected targets; the sidebar shows the total before you start.
 - The **Runs** view groups each submission with its targets and result counts. Rename groups, edit individual run names/notes, and switch between outputs. **Stop run** affects only the selected run; **Cancel queued run** removes its row immediately. Closing or cancelling the final row also removes its group; saved logs remain on disk.
 - Settings defaults to two simultaneous runs overall and one per profile. Shared groups let profiles targeting the same environment share a limit. Waiting runs start automatically when capacity is available.
+- An amber dot on **Refresh specs** means spec files or discovery settings changed. Refresh when runs have finished to update the list.
 - Each run keeps the latest 500,000 characters in its output view. **Run command and artifacts** opens secondary details in a dialog. Complete plain-text logs are saved in `spec-runner-logs/`; use **Open log** after a run finishes or stops to open the saved file in your default application, or **Open log location** to reveal it in your file manager.
 - **Copy output** copies the complete plain-text log so far, including output beyond the visible history, up to 20 MiB. Larger logs remain available as files. Scrolling up pauses **Follow output**; scrolling back to the bottom or enabling it again resumes following.
 

@@ -141,6 +141,35 @@ async function main() {
                         if(revealedLogs.length!==1||revealedLogs[0]!==result.logPath) throw Error('Reveal log did not use the saved run log');
                         if(openedLogs.length!==2 || openedLogs.some(file=>file!==result.logPath)) throw Error('Open log did not use the saved run log');
                         if((await clipboard.readText()).replace(/\\r\\n/g,'\\n')!==result.matrix[0].output.replace(/\\r\\n/g,'\\n')) throw Error('Copy output did not copy the full selected log');
+                        await window.webContents.executeJavaScript("globalThis.smokeSpecEvents=[];globalThis.stopSpecListener=window.specRunner.onSpecChanges(value=>globalThis.smokeSpecEvents.push(value));void 0;");
+                        for(let index=0;index<6;index++) await require('node:fs/promises').writeFile(require('node:path').join(${JSON.stringify(root)}, 'cypress/e2e/split-'+index+'.cy.ts'), '');
+                        let changed=false;
+                        for(let index=0;index<150;index++) {
+                            changed=await window.webContents.executeJavaScript("globalThis.smokeSpecEvents.includes(true)&&!!document.querySelector('[aria-label=\\\"Spec changes detected\\\"]')");
+                            if(changed) break;
+                            await new Promise(resolve=>setTimeout(resolve,100));
+                        }
+                        if(!changed) throw Error('A new spec did not reach the renderer refresh indicator');
+                        await window.webContents.executeJavaScript(\`(async()=>{
+                            const project=await window.specRunner.refresh();
+                            if(project.specs.length!==7) throw Error('Refresh did not discover new specs');
+                            const plan={specs:project.specs,profiles:[project.config.defaultProfile,'second'],browsers:['electron','chrome'],headed:false,executionMode:'split'};
+                            const preview=await window.specRunner.previewMatrix(plan);
+                            if(preview.split(String.fromCharCode(10)).length!==4) throw Error('Split preview did not include four workers');
+                            const split=await window.specRunner.runMatrix(plan);
+                            const assigned=split.runs.flatMap(run=>run.specs);
+                            if(split.runs.length!==4||new Set(assigned).size!==7||assigned.length!==7||split.batch.specCount!==7||split.batch.executionMode!=='split') throw Error('Split matrix duplicated or dropped specs');
+                            for(let attempt=0;attempt<400;attempt++) {
+                                const runs=await Promise.all(split.runs.map(run=>window.specRunner.state(run.id)));
+                                if(runs.every(run=>run.status==='passed')) {
+                                    for(const run of runs){const args=JSON.parse(run.output).args;if(args[args.indexOf('--spec')+1]!==run.specs.join(','))throw Error('Split execution differs from its plan');}
+                                    await window.specRunner.closeBatch(split.batch.id);globalThis.stopSpecListener();return;
+                                }
+                                if(runs.some(run=>run.status==='failed')||attempt===399) throw Error('Split matrix did not pass');
+                                await new Promise(resolve=>setTimeout(resolve,20));
+                            }
+                        })()\`);
+                        if(await window.webContents.executeJavaScript("!!document.querySelector('[aria-label=\\\"Spec changes detected\\\"]')")) throw Error('Refresh did not clear the changed indicator');
                         console.log('PACKAGED_RUN:' + JSON.stringify(result)); app.exit(0);
                     } catch(error) { console.error(error); app.exit(1); }
                 }, 30);
@@ -173,7 +202,7 @@ async function main() {
             assert.ok(args.includes('--posix-exit-codes'));
             assert.equal(args[args.indexOf('--browser') + 1], run.browser);
         }
-        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs.');
+        console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs. A split matrix executed seven specs exactly once across four workers, and file changes reached the refresh indicator.');
     } finally { await fs.rm(root, { recursive: true, force: true }); }
 }
 module.exports = { archiveFilename, installArguments };

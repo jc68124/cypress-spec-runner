@@ -7,6 +7,7 @@ const api: RunnerAPI = {
     onNotificationClick: listener => { const handler = (_event: unknown, id: string | null) => listener(id); ipcRenderer.on('notifications:click', handler); return () => { ipcRenderer.removeListener('notifications:click', handler); }; },
     project: () => ipcRenderer.invoke('project:get'),
     refresh: () => ipcRenderer.invoke('project:refresh'),
+    onSpecChanges: listener => { const handler = (_event: unknown, changed: boolean) => listener(changed); ipcRenderer.on('specs:changed', handler); return () => { ipcRenderer.removeListener('specs:changed', handler); }; },
     initialize: config => ipcRenderer.invoke('project:initialize', config),
     saveConfig: (config, revision) => ipcRenderer.invoke('config:save', config, revision),
     saveCategories: (categories, revision) => ipcRenderer.invoke('categories:save', categories, revision),

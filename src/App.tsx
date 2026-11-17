@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Category, NotificationStatus, MatrixOptions, Project, ProjectConfig, RunOptions, RunJob, RunBatch, SaveResult } from '../shared/types';
+import type { Category, NotificationStatus, ExecutionMode, MatrixOptions, Project, ProjectConfig, RunOptions, RunJob, RunBatch, SaveResult } from '../shared/types';
 import { availableBrowsers } from '../shared/types';
-import { mergeBatch, mergeRun, pendingRun } from '../shared/runs';
+import { mergeBatch, mergeRun, pendingRun, plannedRunCount } from '../shared/runs';
 import { RunOutput } from './RunOutput';
 import { selectionState, toggleSpecs } from '../shared/selection';
 import { sortSpecs, specSortOrders, type SpecSort } from '../shared/spec-sort';
@@ -11,8 +11,8 @@ import { CategoryEditor } from './CategoryEditor';
 import { Settings } from './Settings';
 import { RunSetup } from './RunSetup';
 type View = 'categories' | 'specs' | 'output' | 'settings';
-type Preferences = { selected: string[]; profile: string; browser: RunOptions['browser']; headed: boolean; follow: boolean; specSort: SpecSort; profiles: string[]; browsers: RunOptions['browser'][]; notify: boolean; isolateArtifacts: boolean };
-const initialPreferences: Preferences = { selected: [], profile: '', browser: 'chrome', headed: false, follow: true, specSort: 'name-asc', profiles: [], browsers: [], notify: false, isolateArtifacts: true };
+type Preferences = { selected: string[]; profile: string; browser: RunOptions['browser']; headed: boolean; follow: boolean; specSort: SpecSort; profiles: string[]; browsers: RunOptions['browser'][]; notify: boolean; isolateArtifacts: boolean; executionMode: ExecutionMode };
+const initialPreferences: Preferences = { selected: [], profile: '', browser: 'chrome', headed: false, follow: true, specSort: 'name-asc', profiles: [], browsers: [], notify: false, isolateArtifacts: true, executionMode: 'repeat' };
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 function readPreferences(root: string): Preferences {
     try { return { ...initialPreferences, ...JSON.parse(localStorage.getItem(`spec-runner:${root}`) ?? '{}') }; } catch { return initialPreferences; }
@@ -28,6 +28,7 @@ export function App() {
     const removedBatches = useRef(new Set<string>());
     const [selectedRun, setSelectedRun] = useState<string | null>(null);
     const [error, setError] = useState('');
+    const [specsChanged, setSpecsChanged] = useState(false);
     const [loading, setLoading] = useState(true);
     const [pending, setPending] = useState(false);
     const [commitFiles, setCommitFiles] = useState<string[]>([]);
@@ -63,9 +64,9 @@ export function App() {
                 profiles: profiles.length ? profiles : [profile], browsers: chosenBrowsers.length ? chosenBrowsers : [browser],
                 profile: next.config.profiles.some(profile => profile.id === saved.profile) ? saved.profile : next.config.defaultProfile,
                 browser: availableBrowsers(next.config).includes(saved.browser) ? saved.browser : availableBrowsers(next.config)[0], headed: !!saved.headed, follow: saved.follow !== false,
-                specSort: specSortOrders.includes(saved.specSort) ? saved.specSort : 'name-asc', notify: saved.notify === true, isolateArtifacts: saved.isolateArtifacts !== false };
+                specSort: specSortOrders.includes(saved.specSort) ? saved.specSort : 'name-asc', notify: saved.notify === true, isolateArtifacts: saved.isolateArtifacts !== false, executionMode: saved.executionMode === 'split' ? 'split' : 'repeat' };
         });
-        setProject(next);
+        setProject(next); setSpecsChanged(false);
         if (first && !next.initialized) setView('settings');
     }
     function acceptRun(job: RunJob) {
@@ -80,6 +81,7 @@ export function App() {
     useEffect(() => {
         let alive = true;
         if (!window.specRunner) { setError('Start the app using the spec-runner command in a Cypress project.'); setLoading(false); return; }
+        const unsubscribeSpecs = window.specRunner.onSpecChanges(changed => { if (alive) setSpecsChanged(changed); });
         const unsubscribe = window.specRunner.onRunState(state => { if (alive) acceptRun(state); });
         const unsubscribeNotifications = window.specRunner.onNotificationStatus(status => { if (alive) { setNotificationState(status); if (status.error) setError(status.error); } });
         const unsubscribeClick = window.specRunner.onNotificationClick(id => { if (alive) { if (id) setSelectedRun(id); setView('output'); } });
@@ -87,7 +89,7 @@ export function App() {
         void Promise.all([window.specRunner.project(), window.specRunner.runs(), window.specRunner.batches()]).then(([next, jobs, groups]) => {
             if (alive) { acceptProject(next); jobs.forEach(acceptRun); groups.forEach(acceptBatch); }
         }).catch(error => { if (alive) setError(message(error)); }).finally(() => { if (alive) setLoading(false); });
-        return () => { alive = false; unsubscribe(); unsubscribeBatches(); unsubscribeNotifications(); unsubscribeClick(); };
+        return () => { alive = false; unsubscribeSpecs(); unsubscribe(); unsubscribeBatches(); unsubscribeNotifications(); unsubscribeClick(); };
     }, []);
     useEffect(() => { if (project) { try { localStorage.setItem(`spec-runner:${project.root}`, JSON.stringify(preferences)); } catch { /* Optional local preferences. */ } } }, [preferences, project?.root]);
     useEffect(() => {
@@ -99,8 +101,8 @@ export function App() {
     const selected = preferences.selected;
     const available = useMemo(() => new Set(project?.specs ?? []), [project?.specs]);
     const selectedSpecs = useMemo(() => selected.filter(spec => available.has(spec)), [selected, available]);
-    const options = useMemo<MatrixOptions>(() => ({ specs: selectedSpecs, profiles: preferences.profiles, browsers: preferences.browsers, headed: preferences.headed, isolateArtifacts: preferences.isolateArtifacts }), [selectedSpecs, preferences.profiles, preferences.browsers, preferences.headed, preferences.isolateArtifacts]);
-    const plannedRuns = options.profiles.length * options.browsers.length;
+    const options = useMemo<MatrixOptions>(() => ({ specs: selectedSpecs, profiles: preferences.profiles, browsers: preferences.browsers, headed: preferences.headed, isolateArtifacts: preferences.isolateArtifacts, executionMode: preferences.executionMode }), [selectedSpecs, preferences.profiles, preferences.browsers, preferences.headed, preferences.isolateArtifacts, preferences.executionMode]);
+    const plannedRuns = plannedRunCount(selectedSpecs.length, options.profiles.length, options.browsers.length, options.executionMode);
     useEffect(() => {
         let alive = true;
         setPreview(''); setPreviewError(''); setCopied(false);
@@ -131,7 +133,7 @@ export function App() {
     const viewedSpecs = viewedCategory?.specs.filter(spec => available.has(spec)) ?? [];
     const viewedCount = viewedSpecs.filter(spec => selected.includes(spec)).length;
     return <main className="flex h-screen flex-col overflow-hidden bg-zinc-950">
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-zinc-900 px-5 py-3"><h1 className="min-w-0 truncate text-lg font-semibold text-white">{project?.config.name ?? 'Open your Cypress project'}</h1><Button small title={active ? 'Refresh specs is unavailable while runs are active or queued. Finish or stop active runs and cancel queued runs first.' : undefined} disabled={!project || pending || active} onClick={() => void operation(async () => acceptProject(await window.specRunner.refresh()))}>Refresh specs</Button></header>
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-zinc-900 px-5 py-3"><h1 className="min-w-0 truncate text-lg font-semibold text-white">{project?.config.name ?? 'Open your Cypress project'}</h1><Button small title={active ? `${specsChanged ? 'Spec changes detected. ' : ''}Refresh specs is unavailable while runs are active or queued. Finish or stop active runs and cancel queued runs first.` : specsChanged ? 'Spec files or discovery settings changed. Refresh to update the list and edit dates.' : 'Refresh the spec list and edit dates'} disabled={!project || pending || active} onClick={() => void operation(async () => acceptProject(await window.specRunner.refresh()))}>Refresh specs{specsChanged && <span role="status" aria-label="Spec changes detected" className="ml-1 inline-block h-2 w-2 shrink-0 rounded-full bg-amber-300" />}</Button></header>
         {error && <div role="alert" className="flex shrink-0 justify-between gap-4 border-b border-red-400/20 bg-red-500/10 px-7 py-3 text-sm text-red-300"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
         {!!commitFiles.length && <div role="status" className="flex shrink-0 justify-between gap-4 border-b border-indigo-400/20 bg-indigo-500/10 px-7 py-3 text-sm text-indigo-200"><div><strong>Saved locally.</strong> Commit these files to share the changes with your team.<div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">{commitFiles.map(file => <code key={file}>{file}</code>)}</div></div><button aria-label="Dismiss commit reminder" onClick={() => setCommitFiles([])}>×</button></div>}
         {loading ? <p className="p-8 text-sm text-zinc-400">Loading specs…</p> : !project ? <div className="m-8 max-w-2xl space-y-3"><h2 className="text-lg font-semibold">Start from a Cypress project</h2><p className="text-zinc-400">Install the package in your project and run <code>cypress-spec-runner init</code> to create shared configuration.</p></div> : <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_350px]">
@@ -153,16 +155,16 @@ export function App() {
             </section>
             <aside aria-label="Run controls" className="space-y-5 overflow-y-auto border-l border-white/10 bg-zinc-900/50 p-6"><div><div className="flex items-start justify-between"><div><h2 className="text-sm font-semibold text-white">Next run</h2><p className="mt-2 text-3xl font-semibold text-white">{selectedSpecs.length}<span className="ml-2 text-xs font-normal text-zinc-400">of {project.specs.length} specs</span></p></div><Button small kind="plain" disabled={!selectedSpecs.length} onClick={() => toggle(selectedSpecs, false)}>Clear</Button></div><Button small className="mt-3" disabled={!selectedSpecs.length} onClick={() => setReviewing(true)}>Review selected</Button></div><p className="text-xs leading-5 text-zinc-400">Shared specs count once. Each selected file runs all its tests.</p>
                 <div className="space-y-3 border-t border-white/10 pt-5"><h3 className="text-sm font-semibold text-white">Run targets</h3><p className="line-clamp-2 break-words text-xs leading-5 text-zinc-300" title={project.config.profiles.filter(profile => preferences.profiles.includes(profile.id)).map(profile => profile.name).join(', ')}>{project.config.profiles.filter(profile => preferences.profiles.includes(profile.id)).map(profile => profile.name).join(', ') || 'No profiles selected'}</p><p className="text-xs text-zinc-400">{preferences.browsers.join(', ') || 'No browsers selected'} · {preferences.headed ? 'headed' : 'headless'}</p><Button small disabled={pending} onClick={() => setConfiguring(true)}>Configure run</Button></div>
-                <div className="space-y-3"><p role="status" aria-label="Planned runs" className="rounded-lg border border-white/10 bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">{selectedSpecs.length} specs × {preferences.profiles.length} {preferences.profiles.length === 1 ? 'profile' : 'profiles'} × {preferences.browsers.length} {preferences.browsers.length === 1 ? 'browser' : 'browsers'} = <strong className="text-white">{plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</strong></p>
+                <div className="space-y-3"><p role="status" aria-label="Planned runs" className="rounded-lg border border-white/10 bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">{preferences.executionMode === 'split' ? <>{selectedSpecs.length} specs split across <strong className="text-white">{plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</strong> · once each</> : <>{selectedSpecs.length} specs × {preferences.profiles.length} {preferences.profiles.length === 1 ? 'profile' : 'profiles'} × {preferences.browsers.length} {preferences.browsers.length === 1 ? 'browser' : 'browsers'} = <strong className="text-white">{plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</strong></>}</p>
                     <Button kind="primary" className="w-full whitespace-normal" disabled={!preview || pending || !project.initialized} onClick={() => void operation(async () => { const result = await window.specRunner.runMatrix(options); result.runs.forEach(acceptRun); acceptBatch(result.batch); setSelectedRun(result.runs[0]?.id ?? null); setView('output'); })}>Start {plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</Button>
-                    <Button className="w-full" disabled={!preview || pending} onClick={() => void operation(async () => { await window.specRunner.copy(preview); setCopied(true); })}>{copied ? 'Copied commands' : plannedRuns === 1 ? 'Copy command' : 'Copy commands'}</Button><p className="text-xs leading-5 text-zinc-500">Each combination gets its own output and log. Busy profiles queue automatically.</p>{!plannedRuns && <p className="text-xs text-amber-200">Choose at least one profile and browser.</p>}{previewError && <p role="alert" className="text-xs text-red-300">{previewError}</p>}
+                    <Button className="w-full" disabled={!preview || pending} onClick={() => void operation(async () => { await window.specRunner.copy(preview); setCopied(true); })}>{copied ? 'Copied commands' : plannedRuns === 1 ? 'Copy command' : 'Copy commands'}</Button><p className="text-xs leading-5 text-zinc-500">Each combination gets its own output and log. Busy profiles queue automatically.</p>{!plannedRuns && <p className="text-xs text-amber-200">Choose at least one spec, profile and browser.</p>}{previewError && <p role="alert" className="text-xs text-red-300">{previewError}</p>}
                 </div>
                 <details className="rounded-lg border border-white/10 bg-zinc-950 p-3"><summary className="cursor-pointer text-xs text-zinc-400">Command preview</summary><code className="mt-3 block max-h-48 overflow-y-auto text-xs leading-6 break-all text-zinc-300">{preview || 'Select specs to build a command.'}</code><p className="mt-2 text-xs leading-5 text-zinc-500">Local environment references are resolved by this app when a run starts.</p></details><div role="status" className="border-t border-white/10 pt-4 text-sm text-zinc-300">{runningCount} running · {queuedCount} queued</div>
             </aside>
         </div>}
         {viewedCategory && <Modal title={viewedCategory.name} description="Tick specs for your next run. Edit category changes shared assignments." onClose={() => setViewing(null)} actions={<><Button title={lockReason} disabled={active} onClick={() => { setEditing(viewedCategory); setViewing(null); }}>Edit category</Button><Button kind="primary" onClick={() => setViewing(null)}>Done</Button></>}><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-zinc-400">{viewedCount} of {viewedSpecs.length} selected</p><div className="flex gap-2"><Button small disabled={viewedCount === viewedSpecs.length} onClick={() => toggle(viewedSpecs, true)}>Select all</Button><Button small kind="plain" disabled={!viewedCount} onClick={() => toggle(viewedSpecs, false)}>Deselect all</Button></div></div><div className="max-h-96 overflow-y-auto rounded-lg border border-white/10"><SpecList specs={viewedSpecs} selected={selectedSpecs} onToggle={toggle} /></div></Modal>}
         {reviewing && <Modal title="Review selected specs" description="These files are included in your next run. Untick a file to remove it." onClose={() => setReviewing(false)} actions={<Button kind="primary" onClick={() => setReviewing(false)}>Done</Button>}><p className="mb-3 text-sm text-zinc-400">{selectedSpecs.length} specs selected</p>{selectedSpecs.length ? <div className="max-h-96 overflow-y-auto"><SpecList specs={selectedSpecs} selected={selectedSpecs} onToggle={toggle} /></div> : <p className="text-sm text-zinc-400">No specs selected. Choose categories or individual specs to build your run.</p>}</Modal>}
-        {configuring && project && <RunSetup config={project.config} targets={{ profiles: preferences.profiles, browsers: preferences.browsers, headed: preferences.headed, isolateArtifacts: preferences.isolateArtifacts }} specCount={selectedSpecs.length} onClose={() => setConfiguring(false)} onApply={targets => { setPreferences(current => ({ ...current, ...targets })); setConfiguring(false); }} />}
+        {configuring && project && <RunSetup config={project.config} targets={{ profiles: preferences.profiles, browsers: preferences.browsers, headed: preferences.headed, isolateArtifacts: preferences.isolateArtifacts, executionMode: preferences.executionMode }} specCount={selectedSpecs.length} onClose={() => setConfiguring(false)} onApply={targets => { setPreferences(current => ({ ...current, ...targets })); setConfiguring(false); }} />}
         {editing && project && <CategoryEditor key={editing.id} category={editing} specs={project.specs} existing={project.categories.some(category => category.id === editing.id)} onClose={() => setEditing(null)} onSave={saveCategory} />}
     </main>;
 }

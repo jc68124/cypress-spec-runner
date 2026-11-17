@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { writeFile, rm, utimes } from 'node:fs/promises';
+import path from 'node:path';
+import { SpecChanges } from '../electron/spec-changes';
+import { loadProject } from '../electron/project';
+import { fixture } from './helpers';
+
+test('spec changes detect edits, additions, removals and discovery changes until refreshed', async t => {
+    const root = await fixture(t), events: boolean[] = [];
+    let reads = 0;
+    const monitor = new SpecChanges(async () => { reads++; return loadProject(root); }, changed => events.push(changed));
+    monitor.accept(await loadProject(root)); await monitor.check();
+    assert.deepEqual(events, [false]);
+    await utimes(path.join(root, 'cypress/e2e/features/Example.cy.ts'), new Date(1000), new Date(1000));
+    await monitor.check(); assert.equal(events.at(-1), true);
+    const before = reads; await monitor.check(); assert.equal(reads, before, 'Dirty state should stop repeated scans');
+    monitor.accept(await loadProject(root)); assert.equal(events.at(-1), false);
+    await writeFile(path.join(root, 'cypress/e2e/Added.cy.ts'), '');
+    await monitor.check(); assert.equal(events.at(-1), true);
+    monitor.accept(await loadProject(root));
+    await rm(path.join(root, 'cypress/e2e/Added.cy.ts'));
+    await monitor.check(); assert.equal(events.at(-1), true);
+    monitor.accept(await loadProject(root));
+    await writeFile(path.join(root, 'cypress.config.ts'), "export default {e2e:{specPattern:'cypress/e2e/features/*.cy.ts'}};");
+    await monitor.check(); assert.equal(events.at(-1), true);
+    monitor.accept(await loadProject(root));
+    await writeFile(path.join(root, 'cypress/e2e/features/helper.ts'), '// Not a spec');
+    await monitor.check(); assert.equal(events.at(-1), false, 'Non-spec edits should not mark specs dirty');
+});
+test('refresh invalidates in-flight scans, scans do not overlap and read errors mark refresh needed', async () => {
+    const baseline = { specs: ['example.cy.ts'], specModifiedTimes: { 'example.cy.ts': 1 } };
+    let resolve!: (snapshot: typeof baseline) => void, reads = 0;
+    const events: boolean[] = [];
+    const monitor = new SpecChanges(() => { reads++; return new Promise(done => { resolve = done; }); }, changed => events.push(changed));
+    monitor.accept(baseline);
+    const pending = monitor.check(); await monitor.check(); assert.equal(reads, 1);
+    monitor.accept(baseline); resolve({ ...baseline, specs: [] }); await pending;
+    assert.equal(events.at(-1), false);
+    const failed = new SpecChanges(async () => { throw Error('Unfinished config edit'); }, changed => events.push(changed));
+    failed.accept(baseline); await failed.check(); assert.equal(events.at(-1), true);
+    failed.accept(baseline); assert.equal(events.at(-1), false);
+});

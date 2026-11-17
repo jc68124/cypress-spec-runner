@@ -3,8 +3,8 @@ import path from 'node:path';
 import { Runner } from './runner';
 import { PlainText } from './run-log';
 import { commandPreview, loadProject, validateRun } from './project';
-import type { MatrixOptions, MatrixResult, ProjectConfig, RunBatch, RunDetails, RunJob, RunOptions } from '../shared/types';
-import { matrixRuns, maxOpenBatches, maxOpenRuns, pendingRun, validateRunDetails } from '../shared/runs';
+import type { ExecutionMode, MatrixOptions, MatrixResult, ProjectConfig, RunBatch, RunDetails, RunJob, RunOptions } from '../shared/types';
+import { matrixRuns, validateMatrixTargets, maxOpenBatches, maxOpenRuns, pendingRun, validateRunDetails } from '../shared/runs';
 
 type Entry = { job: RunJob; runner: Runner; config: ProjectConfig; options: RunOptions };
 export class RunManager {
@@ -70,12 +70,12 @@ export class RunManager {
     async enqueueMatrix(input: MatrixOptions): Promise<MatrixResult> {
         if (this.shuttingDown) throw Error('The application is stopping its runs.');
         const selection = structuredClone(input);
-        return this.enqueueOptions(matrixRuns(selection));
+        return this.enqueueOptions(matrixRuns(selection), undefined, undefined, selection.executionMode ?? 'repeat', selection);
     }
     async rerun(id: string): Promise<MatrixResult> {
         const entry = this.entry(id);
         if (pendingRun(entry.job)) throw Error('Finish or stop this run before rerunning it.');
-        return this.enqueueOptions([structuredClone(entry.options)], `${entry.job.name} (rerun)`, [{ name: entry.job.name, notes: entry.job.notes }]);
+        return this.enqueueOptions([structuredClone(entry.options)], `${entry.job.name} (rerun)`, [{ name: entry.job.name, notes: entry.job.notes }], this.group(entry.job.batchId).executionMode);
     }
     async rerunBatch(id: string, mode: 'all' | 'failed'): Promise<MatrixResult> {
         const batch = this.group(id);
@@ -83,9 +83,9 @@ export class RunManager {
         if (Object.values(batch.statuses).some(status => pendingRun({ status }))) throw Error('Finish, stop or cancel this group before rerunning it.');
         const targets = this.plans.get(id)!.filter(target => mode === 'all' || batch.statuses[target.id] === 'failed');
         if (!targets.length) throw Error('There are no failed runs to rerun.');
-        return this.enqueueOptions(targets.map(target => structuredClone(target.options)), `${batch.name} (${mode === 'failed' ? 'failed rerun' : 'rerun'})`, targets.map(target => ({ ...target.details })));
+        return this.enqueueOptions(targets.map(target => structuredClone(target.options)), `${batch.name} (${mode === 'failed' ? 'failed rerun' : 'rerun'})`, targets.map(target => ({ ...target.details })), batch.executionMode);
     }
-    private async enqueueOptions(combinations: RunOptions[], name?: string, details?: RunDetails[]): Promise<MatrixResult> {
+    private async enqueueOptions(combinations: RunOptions[], name?: string, details?: RunDetails[], executionMode: ExecutionMode = 'repeat', selection?: MatrixOptions): Promise<MatrixResult> {
         if (this.shuttingDown) throw Error('The application is stopping its runs.');
         if (this.entries.size + this.preparing + combinations.length > maxOpenRuns) throw Error(`Close completed run tabs before adding more runs (maximum ${maxOpenRuns}).`);
         const generation = this.generation;
@@ -93,6 +93,7 @@ export class RunManager {
         try {
             const project = await loadProject(this.root);
             const config = structuredClone(project.config);
+            if (selection) validateMatrixTargets(selection, config);
             const validated = await Promise.all(combinations.map(options => validateRun(this.root, options, config, project.specs)));
             if (this.shuttingDown || generation !== this.generation) throw Error('The application is stopping its runs.');
             if (this.groups.size >= maxOpenBatches) {
@@ -100,9 +101,9 @@ export class RunManager {
                 if (unused) this.closeBatch(unused.id);
                 else throw Error('Close a completed run group before adding more groups.');
             }
-            const batch: RunBatch = { id: randomUUID(), revision: 0, name: (name ?? `${validated.length > 1 ? 'Matrix' : 'Run'} #${this.nextBatchNumber++}`).slice(0, 100),
+            const batch: RunBatch = { id: randomUUID(), revision: 0, name: (name ?? `${executionMode === 'split' ? 'Split' : validated.length > 1 ? 'Matrix' : 'Run'} #${this.nextBatchNumber++}`).slice(0, 100),
                 createdAt: Date.now(), profiles: [...new Set(validated.map(options => options.profile))].map(id => ({ id, name: config.profiles.find(profile => profile.id === id)!.name })),
-                browsers: [...new Set(validated.map(options => options.browser))], specCount: validated[0].specs.length, statuses: {}, targets: [] };
+                browsers: [...new Set(validated.map(options => options.browser))], specCount: new Set(validated.flatMap(options => options.specs)).size, executionMode, statuses: {}, targets: [] };
             const entries = validated.map((options, index) => {
                 const id = randomUUID(), artifactDirectory = path.join(this.root, 'spec-runner-logs', id);
                 const profile = config.profiles.find(profile => profile.id === options.profile)!;
@@ -122,10 +123,10 @@ export class RunManager {
                     outputTruncated: false, outputStartLine: 0, logPath: null, logError: null,
                 } };
                 if (details?.[index]) Object.assign(entry.job, details[index]);
-                batch.statuses[id] = 'queued'; batch.targets.push({ id, profileId: profile.id, browser: options.browser }); return entry;
+                batch.statuses[id] = 'queued'; batch.targets.push({ id, profileId: profile.id, browser: options.browser, specCount: options.specs.length }); return entry;
             });
             this.groups.set(batch.id, batch);
-            this.plans.set(batch.id, entries.map(entry => ({ id: entry.job.id, options: { ...entry.options, specs: validated[0].specs }, details: { name: entry.job.name, notes: entry.job.notes } })));
+            this.plans.set(batch.id, entries.map(entry => ({ id: entry.job.id, options: { ...entry.options }, details: { name: entry.job.name, notes: entry.job.notes } })));
             for (const entry of entries) this.entries.set(entry.job.id, entry);
             this.notifyGroup(batch);
             for (const entry of entries) this.notify(entry);
