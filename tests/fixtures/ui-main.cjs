@@ -6,9 +6,9 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3');
     await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
     const result = await win.webContents.executeJavaScript(`(async () => {
-        const wait = async check => { for(let i=0;i<200;i++){ if(check())return; await new Promise(r=>setTimeout(r,20)); } throw Error('Timed out: '+check+'; '+document.body.textContent.slice(-2000)); };
+        const wait = async check => { for(let i=0;i<200;i++){ if(await check())return; await new Promise(r=>setTimeout(r,20)); } throw Error('Timed out: '+check+'; '+document.body.textContent.slice(-2000)); };
         const assert = (value,message) => {if(!value) throw Error(message);};
-        const button = (name,root=document) => [...root.querySelectorAll('button')].find(b=>b.textContent.trim()===name);
+        const button = (name,root=document) => [...root.querySelectorAll('button')].find(b=>b.textContent.trim()===name||b.getAttribute('aria-label')===name);
         const fill = (id,value) => { const input=document.getElementById(id); const setter=Object.getOwnPropertyDescriptor(input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set; setter.call(input,value); input.dispatchEvent(new Event('input',{bubbles:true})); };
         async function configure(profiles, browsers) {
             button('Configure run').click();
@@ -26,7 +26,7 @@ app.whenReady().then(async () => {
         fill('url-default','https://app.example.test');
         button('Save and finish setup').click();
         await wait(()=>document.body.textContent.includes('Saved locally.'));
-        assert(document.querySelector('h1').textContent==='Demo workspace','Project name was not saved');
+        assert(document.querySelector('h1').textContent==='Demo workspace','Project name was not saved');assert(!document.querySelector('header').textContent.includes('/example-project')&&!document.querySelector('header').textContent.includes('Cypress Spec Runner'),'Header still includes redundant app branding or path');
         assert(document.querySelector('aside[aria-label="Run controls"]').textContent.includes('Preview environment'),'Profile was not updated');
         assert(document.body.textContent.includes('.spec-runner/categories.json'),'Commit reminder missing file names');
         document.querySelector('[aria-label="Dismiss commit reminder"]').click();
@@ -166,8 +166,10 @@ app.whenReady().then(async () => {
         button('Stop run').click();
         await wait(()=>button('Open log')&&!button('Open log').disabled);
         assert(!button('Save full log'),'Duplicate save action remains');
+        button('Open log location').click();await wait(async()=>(await window.specRunner.project()).logRevealed && !button('Open log').disabled);
+        assert((await window.specRunner.project()).logRevealed,'Log location did not call the desktop API');
         button('Open log').click();
-        await wait(()=>!button('Open log').disabled);
+        await wait(async()=>(await window.specRunner.project()).logOpened);
         assert((await window.specRunner.project()).logOpened,'Open log did not call the desktop API');
         await wait(()=>!button('Start 1 run').disabled);
         const choose=(id,value)=>{const control=document.getElementById(id);control.value=value;control.dispatchEvent(new Event('change',{bubbles:true}));};
@@ -194,13 +196,14 @@ app.whenReady().then(async () => {
         await wait(()=>tab(3) && button('Cancel queued run'));
         button('Categories').click();
         await wait(()=>button('New category'));
-        assert(lock() && button('New category').disabled && button('Edit category Smoke checks').disabled,'Category editing lock was not explained');
+        assert(!lock() && button('New category').disabled && button('Edit category Smoke checks').disabled && button('Edit category Smoke checks').title.includes('active or queued'),'Category lock should be explained on edit controls without a banner');
         assert(!document.querySelector('[aria-label="Select category Smoke checks"]').disabled,'Spec selection was locked with category editing');
         button('View specs in Smoke checks').click();
         await wait(()=>document.querySelector('[role=dialog]'));
         const lockedDialog=document.querySelector('[role=dialog]');
-        assert(lockedDialog.textContent.includes('Shared settings are locked') && button('Edit category',lockedDialog).disabled,'Category dialog hid the reason editing was disabled');
-        button('View runs',lockedDialog).click();
+        assert(!lockedDialog.textContent.includes('Shared settings are locked') && button('Edit category',lockedDialog).disabled && button('Edit category',lockedDialog).title.includes('active or queued'),'Category dialog edit lock tooltip is missing');
+        button('Done',lockedDialog).click();
+        [...document.querySelectorAll('[aria-label="Runner views"] button')].find(b=>b.textContent.startsWith('Runs (')).click();
         await wait(()=>!document.querySelector('[role=dialog]') && tab(3) && button('Cancel queued run'));
         await configure(['Other environment']);
         await wait(()=>button('Start 1 run')&&!button('Start 1 run').disabled);
@@ -208,13 +211,14 @@ app.whenReady().then(async () => {
         await wait(()=>tab(4)&&tab(4).textContent.includes('Running'));
         assert(tab(2).textContent.includes('Running') && tab(3).textContent.includes('Queued'),'Running and queued tabs lost their independent states');
         assert(!button('Configure run').disabled,'Cannot prepare a run while another is active');
+        button('Configure run').click();await wait(()=>document.querySelector('[aria-label="Use separate artifact folders per run"]'));const artifactChoice=document.querySelector('[aria-label="Use separate artifact folders per run"]');assert(artifactChoice.checked,'Artifact isolation should default on');artifactChoice.click();button('Apply configuration',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));await wait(()=>JSON.parse(localStorage.getItem('spec-runner:/example-project')).isolateArtifacts===false);
         await configure(['Test environment']);
         await wait(()=>button('Start 1 run')&&!button('Start 1 run').disabled);
         button('Start 1 run').click();
         await wait(()=>tab(5)&&button('Cancel queued run'));
         button('Cancel queued run').click();
         await wait(()=>!tab(5));
-        assert(document.querySelector('[aria-label="Group results"]').textContent.includes('1 cancelled'),'Removing a queued run lost its group result');
+        assert(!document.querySelector('[data-group-id="batch-5"]'),'Cancelling the final row retained an empty group');
         tab(2).click();
         await wait(()=>document.querySelector('pre')?.textContent==='Example output 2\\n');
         button('Stop run').click();
@@ -240,20 +244,21 @@ app.whenReady().then(async () => {
         assert(document.querySelector('[aria-label="Planned runs"]').textContent.includes('2 profiles × 2 browsers'),'Matrix plan is not visible before submission');
         button('Start 4 runs').click();
         await wait(()=>tab(6)&&tab(7)&&tab(8)&&tab(9));
+        assert((await window.specRunner.state('run-6')).isolateArtifacts===false,'Matrix discarded the artifact preference');
         assert(tab(6).textContent.includes('Running')&&tab(8).textContent.includes('Running')&&tab(7).textContent.includes('Queued')&&tab(9).textContent.includes('Queued'),'Matrix did not apply per-profile concurrency');
-        assert(document.querySelector('[aria-label="Run group summary"]').textContent.includes('2 profiles × 2 browsers = 4 runs'),'Matrix context is missing from output');
+        assert(document.querySelector('[aria-label="Run group summary"]').textContent.includes('4 runs'),'Compact group totals are missing from output');
         button('View matrix').click();await wait(()=>document.querySelector('[role=dialog] table'));
         assert(document.querySelectorAll('[role=dialog] tbody tr').length===2 && document.querySelectorAll('[role=dialog] thead th').length===3,'Matrix did not display profile rows and browser columns');
         document.querySelector('[aria-label="Other environment on electron: Running"]').click();await wait(()=>!document.querySelector('[role=dialog]'));
         assert(document.querySelector('[role=tabpanel]').textContent.includes('Other environment'),'Matrix cell did not open the selected result');
         tab(6).click();await wait(()=>document.querySelector('[role=tabpanel]').textContent.includes('Test environment'));
-        button('Edit run details').click();
+        button('Edit run 6').click();
         await wait(()=>document.getElementById('run-name'));
         fill('run-name','Checkout verification');fill('run-notes','Check the updated selector.');
         button('Save run details',document.querySelector('[role=dialog]')).click();
         await wait(()=>!document.querySelector('[role=dialog]')&&tab(6).textContent.includes('Checkout verification'));
         assert(tab(6).textContent.includes('Test environment')&&tab(6).textContent.includes('electron'),'Renaming hid the actual target');
-        assert(document.querySelector('[role=tabpanel]').textContent.includes('Check the updated selector.'),'Run notes were not shown');
+        button('Run command and artifacts').click();await wait(()=>document.querySelector('[role=dialog]'));assert(document.querySelector('[role=dialog]').textContent.includes('Check the updated selector.'),'Run notes were not available in details');assert(document.querySelector('[role=dialog] pre').textContent.includes('cypress run'),'Command dialog is missing');button('Done',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));
         await window.specRunnerFixture.append('run-6','Output line\\n'.repeat(200));
         const terminal=document.querySelector('pre');
         const followOutput=()=>[...document.querySelectorAll('label')].find(label=>label.textContent.trim()==='Follow output').querySelector('input');
@@ -264,7 +269,7 @@ app.whenReady().then(async () => {
         document.querySelector('[aria-label="Next match"]').click();await wait(()=>document.querySelector('[aria-label="Find matches"]').textContent==='2 of 200');
         document.querySelector('[aria-label="Previous match"]').click();await wait(()=>document.querySelector('[aria-label="Find matches"]').textContent==='1 of 200');
         document.getElementById('output-find').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(()=>!document.getElementById('output-find'));
-        button('Jump to latest').click();await wait(()=>followOutput().checked);
+        assert(!button('Jump to latest'),'Redundant jump control remains');followOutput().click();await wait(()=>followOutput().checked && terminal.scrollHeight-terminal.clientHeight-terminal.scrollTop<=8);
         terminal.scrollTop-=150;terminal.dispatchEvent(new Event('scroll',{bubbles:true}));
         await wait(()=>!followOutput().checked);
         const scrollPosition=terminal.scrollTop;
@@ -275,7 +280,7 @@ app.whenReady().then(async () => {
         await wait(()=>followOutput().checked);
         button('Copy output').click();await wait(()=>button('Copied output'));
         assert((await window.specRunner.project()).copiedOutput.includes('New output after scrolling'),'Copy output did not use the selected run');
-        button('Rename group').click();await wait(()=>document.getElementById('group-name'));fill('group-name','Cross-browser checks');button('Save group name',document.querySelector('[role=dialog]')).click();
+        button('Rename group Matrix #6').click();await wait(()=>document.getElementById('group-name'));fill('group-name','Cross-browser checks');button('Save group name',document.querySelector('[role=dialog]')).click();
         await wait(()=>!document.querySelector('[role=dialog]')&&document.querySelector('[aria-label="Run group summary"]').textContent.includes('Cross-browser checks'));
         tab(7).click();await wait(()=>button('Cancel queued run'));button('Cancel queued run').click();await wait(()=>!tab(7));
         tab(9).click();await wait(()=>button('Cancel queued run'));button('Cancel queued run').click();await wait(()=>!tab(9));
@@ -285,15 +290,24 @@ app.whenReady().then(async () => {
         tab(8).click();await wait(()=>button('Stop run'));button('Stop run').click();await wait(()=>tab(8).textContent.includes('Stopped'));
         document.querySelector('[aria-label="Close run 6"]').click();await wait(()=>!tab(6));
         assert(document.querySelector('[aria-label="Group results"]').textContent.includes('2 stopped'),'Closing a finished row changed matrix totals');
-        button('Close group').click();await wait(()=>!tab(8));
+        button('Close run 8').click();await wait(()=>!tab(8));assert(!document.querySelector('[data-group-id="batch-6"]'),'Closing the final matrix row retained an empty group');
         tab(1).click();await wait(()=>button('Rerun run'));button('Rerun run').click();await wait(()=>tab(10));
-        await window.specRunnerFixture.finish('run-10','failed');await wait(()=>button('Rerun failed')&&!button('Rerun failed').disabled);
+        await window.specRunnerFixture.finish('run-10','failed');button('Run group details').click();await wait(()=>button('Rerun failed')&&!button('Rerun failed').disabled);
         button('Rerun failed').click();await wait(()=>tab(11));
         button('Stop run').click();await wait(()=>tab(11).textContent.includes('Stopped'));
-        button('Rerun group').click();await wait(()=>tab(12));button('Stop run').click();await wait(()=>tab(12).textContent.includes('Stopped'));
+        button('Run group details').click();await wait(()=>button('Rerun group'));button('Rerun group').click();await wait(()=>tab(12));button('Stop run').click();await wait(()=>tab(12).textContent.includes('Stopped'));
         await wait(()=>{const selected=tab(12).getBoundingClientRect(),list=document.querySelector('[aria-label="Run list"]').getBoundingClientRect();return selected.top>=list.top && selected.bottom<=list.bottom;});
+        if(document.querySelector('[aria-label="Dismiss commit reminder"]'))document.querySelector('[aria-label="Dismiss commit reminder"]').click();
         return 'Setup, profile editing, category selection/editing, commit reminders, personal preferences, accessible help, browser restrictions, independent run tabs, queue cancellation, concurrency settings, and 1080p density passed.';
     })()`);
+    for (const [width,height] of [[1920,1080],[1440,960],[980,700]]) {
+        await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:false });
+        await new Promise(resolve=>setTimeout(resolve,100));
+        const metrics=await win.webContents.executeJavaScript(`(()=>{const rect=document.querySelector('[aria-label="Cypress terminal output"]').getBoundingClientRect();return {height:rect.height,width:rect.width,overflow:document.documentElement.scrollWidth>innerWidth,manage:getComputedStyle(document.querySelector('[aria-label="Select run"]').parentElement).display};})()`);
+        if(metrics.height<height*(width>=1280?0.65:0.55) || metrics.width<400 || metrics.overflow) throw Error('Terminal layout too small: '+JSON.stringify({width,height,...metrics}));
+        console.log('Layout '+width+'x'+height+': '+Math.round(metrics.height)+'px terminal height');
+        if(width===980) { await win.webContents.executeJavaScript(`(async()=>{const button=name=>document.querySelector('button[aria-label="'+name+'"]');button('Manage runs').click();for(let i=0;i<100&&!document.querySelector('[aria-label="Manage run list"]');i++)await new Promise(r=>setTimeout(r,20));if(!document.querySelector('[aria-label="Manage run list"]'))throw Error('Narrow run manager did not open');document.querySelector('[aria-label="Manage run list"] button').click();[...document.querySelectorAll('[role=dialog] button')].find(b=>b.textContent==='Done').click();})()`); }
+    }
     if (process.env.SPEC_RUNNER_UI_SCREENSHOT) { win.show(); await new Promise(resolve => setTimeout(resolve, 1500)); require('node:fs').writeFileSync(process.env.SPEC_RUNNER_UI_SCREENSHOT, (await win.webContents.capturePage()).toPNG()); }
     console.log(result); app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1);});

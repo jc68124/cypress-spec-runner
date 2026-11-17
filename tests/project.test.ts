@@ -126,3 +126,22 @@ test('older projects keep all browsers, and restricted browser choices persist a
         assert.throws(() => validateConfig({ ...current.config, browsers }), /at least one supported browser/);
     }
 });
+
+test('POSIX exit codes are version-gated and explicit profile choices are preserved', async t => {
+    const root = await fixture(t), config = await defaults(root);
+    const options = { specs: ['cypress/e2e/features/Example.cy.ts'], profile: config.defaultProfile, browser: 'electron' as const, headed: false };
+    for (const version of [undefined, '12.0.0', '15.3.9']) assert.ok(!runArguments(options, config, {}, undefined, version).includes('--posix-exit-codes'));
+    for (const version of ['15.4.0', '16.0.0']) {
+        const args = runArguments(options, config, {}, undefined, version);
+        assert.equal(args.filter(arg => arg === '--posix-exit-codes').length, 1);
+        assert.match(commandPreview(options, config, undefined, version), /--posix-exit-codes/);
+    }
+    for (const args of [['--posix-exit-codes', 'false'], ['--posix-exit-codes=false'], ['--posix-exit-codes']]) {
+        config.profiles[0].args = args;
+        const result = runArguments(options, config, {}, undefined, '16.0.0');
+        assert.equal(result.filter(arg => arg.startsWith('--posix-exit-codes')).length, 1);
+        assert.ok(args.every(arg => result.includes(arg)));
+    }
+    await assert.rejects(validateRun(root, { ...options, isolateArtifacts: 'false' }), /artifact folder preference/);
+    assert.equal((await loadProject(root)).cypressVersion, '16.0.0');
+});

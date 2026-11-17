@@ -55,11 +55,11 @@ export class Runner {
             const options = await validateRun(root, input, snapshot);
             const requireFromProject = createRequire(path.join(root, 'package.json'));
             const packageFile = requireFromProject.resolve('cypress/package.json');
-            const cypressPackage = requireFromProject('cypress/package.json') as { bin: { cypress: string } };
+            const cypressPackage = requireFromProject('cypress/package.json') as { version: string; bin: { cypress: string } };
             const cli = path.resolve(path.dirname(packageFile), cypressPackage.bin.cypress);
             const config = snapshot ?? (await loadProject(root)).config;
             const env = await runEnvironment(root, config, options.profile, artifacts ? { SPEC_RUNNER_RUN_ID: artifacts.id, SPEC_RUNNER_ARTIFACTS_DIR: artifacts.directory } : {});
-            const args = runArguments(options, config, env, artifacts?.directory);
+            const args = runArguments(options, config, env, artifacts?.directory, cypressPackage.version);
             const log = await RunLog.create(root, options.profile, artifacts?.directory);
             this.log = log;
             const resume = () => { this.child?.stdout?.resume(); this.child?.stderr?.resume(); };
@@ -69,7 +69,7 @@ export class Runner {
                 resume();
                 this.emit();
             });
-            this.current = { status: 'running', output: '', command: commandPreview(options, config, artifacts?.directory), exitCode: null, outputTruncated: false, outputStartLine: 0, logPath: log.path, logError: null };
+            this.current = { status: 'running', output: '', command: commandPreview(options, config, artifacts?.directory, cypressPackage.version), exitCode: null, outputTruncated: false, outputStartLine: 0, logPath: log.path, logError: null };
             const child = spawn(this.executable, [cli, ...args], {
                 cwd: root,
                 env,

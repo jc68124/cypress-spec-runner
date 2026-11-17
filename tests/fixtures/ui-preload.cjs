@@ -12,7 +12,7 @@ function emit(job) {
     if (batch.statuses[job.id] !== job.status) { batch.statuses[job.id] = job.status; batch.revision++; batchCallback({ ...batch }); }
     job.revision++; callback({ ...job });
 }
-function remove(job) { jobs = jobs.filter(item => item.id !== job.id); callback({ ...job, removed: true, revision: job.revision + 1 }); }
+function remove(job, cleanup = true) { jobs = jobs.filter(item => item.id !== job.id); callback({ ...job, removed: true, revision: job.revision + 1 }); if(cleanup&&!jobs.some(item=>item.batchId===job.batchId)){const batch=groups.find(item=>item.id===job.batchId);groups=groups.filter(item=>item.id!==job.batchId);batchCallback({...batch,removed:true,revision:batch.revision+1});} }
 function runMatrix(options) {
     const batch = { id: 'batch-' + (++groupSequence), revision: 0, name: (options.profiles.length * options.browsers.length > 1 ? 'Matrix #' : 'Run #') + groupSequence,
         createdAt: Date.now(), profiles: options.profiles.map(id => ({ id, name: project.config.profiles.find(profile => profile.id === id).name })), browsers: [...options.browsers], specCount: options.specs.length, statuses: {}, targets: [] };
@@ -44,7 +44,7 @@ contextBridge.exposeInMainWorld('specRunner', {
     initialize: async config => { project = { ...project, config: normalize(config ?? project.config), initialized: true, configRevision: String(++revision), revision: String(revision), categories: [{ id: 'account', name: 'Account', specs: specs.slice(0,2) }, { id: 'catalog', name: 'Catalog', specs: specs.slice(2) }] }; return { project, changedFiles: ['spec-runner.config.json', '.spec-runner/categories.json', 'package.json', '.gitignore'] }; },
     saveConfig: async config => { project = { ...project, config: normalize(config), configRevision: String(++revision) }; return { project, changedFiles: ['spec-runner.config.json'] }; },
     saveCategories: async categories => { project = { ...project, categories, revision: String(++revision) }; return { project, changedFiles: ['.spec-runner/categories.json'] }; },
-    preview: async () => 'cypress run --e2e --spec example', copy: async () => {}, openLog: async id => { project.logOpened = id; }, copyOutput: async id => { project.copiedOutput = jobs.find(job => job.id === id).output; },
+    preview: async () => 'cypress run --e2e --spec example', copy: async () => {}, openLogLocation: async id => { project.logRevealed = id; }, openLog: async id => { project.logOpened = id; }, copyOutput: async id => { project.copiedOutput = jobs.find(job => job.id === id).output; },
     run: async options => runMatrix({ ...options, profiles: [options.profile], browsers: [options.browser] }).runs[0],
     runMatrix: async options => runMatrix(options),
     rerun: async id => { const job=jobs.find(job=>job.id===id);return runMatrix({...job,profiles:[job.profileId],browsers:[job.browser]}); },
@@ -54,7 +54,7 @@ contextBridge.exposeInMainWorld('specRunner', {
     onBatchState: listener => { batchCallback = listener; return () => {}; },
     updateRun: async (id, details) => { const job = jobs.find(job => job.id === id); Object.assign(job, details); emit(job); return job; },
     renameBatch: async (id, name) => { const batch = groups.find(batch => batch.id === id); batch.name = name; batch.revision++; batchCallback({ ...batch }); return batch; },
-    closeBatch: async id => { const batch = groups.find(batch => batch.id === id); jobs.filter(job => job.batchId === id).forEach(remove); groups = groups.filter(item => item.id !== id); batchCallback({ ...batch, removed: true, revision: batch.revision + 1 }); },
+    closeBatch: async id => { const batch = groups.find(batch => batch.id === id); jobs.filter(job => job.batchId === id).forEach(job=>remove(job,false)); groups = groups.filter(item => item.id !== id); batchCallback({ ...batch, removed: true, revision: batch.revision + 1 }); },
     stop: async id => { const job = jobs.find(job => job.id === id); const queued = job.status === 'queued'; job.status = queued ? 'cancelled' : 'stopped'; job.finishedAt = Date.now(); job.waitReason = null; emit(job); if (queued) remove(job); pump(); },
     closeRun: async id => { remove(jobs.find(job => job.id === id)); }
 

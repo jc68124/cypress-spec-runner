@@ -61,7 +61,8 @@ async function main() {
             const { app, BrowserWindow, shell, dialog, nativeImage, clipboard } = require('electron');
             const icon = nativeImage.createFromPath(${JSON.stringify(path.join(installed, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'))});
             if (icon.isEmpty() || icon.getSize().width < 16) throw Error('Packaged application icon is missing or invalid');
-            const openedLogs = [];
+            const openedLogs = [], revealedLogs = [];
+            shell.showItemInFolder = file => { revealedLogs.push(file); };
             shell.openPath = async file => { openedLogs.push(file); return openedLogs.length === 1 ? 'No default application is configured.' : ''; };
             dialog.showSaveDialog = async () => { throw Error('The existing log should open without a save dialog'); };
             const original = BrowserWindow.prototype.loadFile;
@@ -80,6 +81,8 @@ async function main() {
                             if(!unavailable) throw Error('A disabled browser was accepted');
                             const noLog = await window.specRunner.openLog('missing').then(()=>null,error=>error.message);
                             if(!noLog) throw Error('A missing log was opened');
+                            const noLocation=await window.specRunner.openLogLocation('missing').then(()=>null,error=>error.message);
+                            if(!noLocation) throw Error('A missing log location was opened');
                             const job=await window.specRunner.run({specs:project.specs,profile:project.config.defaultProfile,browser:'electron',headed:false});
                             for(let index=0;index<300;index++){
                                 const state=await window.specRunner.state(job.id);
@@ -87,12 +90,13 @@ async function main() {
                                     const failure = await window.specRunner.openLog(job.id).then(()=>null,error=>error.message);
                                     if(!failure || !failure.includes('No default application is configured.')) throw Error('Log open failure was hidden');
                                     await window.specRunner.openLog(job.id);
+                                    await window.specRunner.openLogLocation(job.id);
                                     await window.specRunner.closeRun(job.id);
-                                    if((await window.specRunner.runs()).length) throw Error('Closing a completed run left its tab behind');
+                                    if((await window.specRunner.runs()).length || (await window.specRunner.batches()).length) throw Error('Closing the final run left its row or group behind');
                                     const fresh = await window.specRunner.project();
                                     const expanded = { ...fresh.config, browsers: ['electron', 'chrome'], maxConcurrentRuns: 1, profiles: [...fresh.config.profiles, { id: 'second', name: 'Second environment', args: [], env: fresh.config.profiles[0].env }] };
                                     await window.specRunner.saveConfig(expanded, fresh.configRevision);
-                                    const matrix = { specs: fresh.specs, profiles: [fresh.config.defaultProfile, 'second'], browsers: ['electron', 'chrome'], headed: false };
+                                    const matrix = { specs: fresh.specs, profiles: [fresh.config.defaultProfile, 'second'], browsers: ['electron', 'chrome'], headed: false, isolateArtifacts: false };
                                     const invalid = await window.specRunner.runMatrix({ ...matrix, profiles: [fresh.config.defaultProfile, 'missing'] }).then(()=>null,error=>error.message);
                                     if(!invalid || (await window.specRunner.runs()).length) throw Error('Invalid matrix started a partial batch');
                                     const batch = await window.specRunner.runMatrix(matrix);
@@ -133,6 +137,8 @@ async function main() {
                             }
                             throw Error('Run did not complete');
                         })()\`);
+                        if(app.getName()!=='Cypress Spec Runner') throw Error('Native application name is not friendly');
+                        if(revealedLogs.length!==1||revealedLogs[0]!==result.logPath) throw Error('Reveal log did not use the saved run log');
                         if(openedLogs.length!==2 || openedLogs.some(file=>file!==result.logPath)) throw Error('Open log did not use the saved run log');
                         if((await clipboard.readText()).replace(/\\r\\n/g,'\\n')!==result.matrix[0].output.replace(/\\r\\n/g,'\\n')) throw Error('Copy output did not copy the full selected log');
                         console.log('PACKAGED_RUN:' + JSON.stringify(result)); app.exit(0);
@@ -153,6 +159,7 @@ async function main() {
         const result = JSON.parse(state.output);
         assert.equal(result.value, 'fixture-value');
         assert.ok(result.args.includes('cypress/e2e/example.cy.ts'));
+        assert.ok(result.args.includes('--posix-exit-codes'));
         assert.equal(path.dirname(state.logPath), state.artifactDirectory);
         const artifactConfig = JSON.parse(result.args[result.args.indexOf('--config') + 1]);
         assert.equal(artifactConfig.downloadsFolder, path.join(state.artifactDirectory, 'downloads'));
@@ -161,6 +168,9 @@ async function main() {
         for (const run of state.matrix) {
             assert.equal(await fs.readFile(run.logPath, 'utf8'), run.output);
             const args = JSON.parse(run.output).args;
+            assert.equal(run.isolateArtifacts, false);
+            assert.ok(!args.join(' ').includes('screenshotsFolder'));
+            assert.ok(args.includes('--posix-exit-codes'));
             assert.equal(args[args.indexOf('--browser') + 1], run.browser);
         }
         console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs.');

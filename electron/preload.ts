@@ -23,6 +23,7 @@ const api: RunnerAPI = {
     stop: id => ipcRenderer.invoke('run:stop', id),
     closeRun: id => ipcRenderer.invoke('run:close', id),
     runs: () => ipcRenderer.invoke('run:list'),
+    openLogLocation: id => ipcRenderer.invoke('run:open-log-location', id),
     openLog: id => ipcRenderer.invoke('run:open-log', id),
     copyOutput: id => ipcRenderer.invoke('run:copy-output', id),
     state: id => ipcRenderer.invoke('run:state', id),

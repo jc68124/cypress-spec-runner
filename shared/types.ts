@@ -35,13 +35,14 @@ export interface Project {
     specs: string[];
     specModifiedTimes: Record<string, number>;
     discovery?: SpecDiscovery;
+    cypressVersion?: string;
     categories: Category[];
     revision: string;
     initialized: boolean;
 }
 export interface SaveResult { project: Project; changedFiles: string[] }
-export interface RunOptions { specs: string[]; profile: string; browser: Browser; headed: boolean }
-export interface MatrixOptions { specs: string[]; profiles: string[]; browsers: Browser[]; headed: boolean }
+export interface RunOptions { specs: string[]; profile: string; browser: Browser; headed: boolean; isolateArtifacts?: boolean }
+export interface MatrixOptions { specs: string[]; profiles: string[]; browsers: Browser[]; headed: boolean; isolateArtifacts?: boolean }
 export interface RunDetails { name: string; notes: string }
 export interface RunBatch {
     id: string;
@@ -79,6 +80,7 @@ export interface RunJob extends Omit<RunState, 'status'> {
     profileName: string;
     browser: Browser;
     headed: boolean;
+    isolateArtifacts?: boolean;
     specs: string[];
     createdAt: number;
     startedAt: number | null;
@@ -111,6 +113,7 @@ export interface RunnerAPI {
     stop(id: string): Promise<void>;
     closeRun(id: string): Promise<void>;
     openLog(id: string): Promise<void>;
+    openLogLocation(id: string): Promise<void>;
     copyOutput(id: string): Promise<void>;
     state(id: string): Promise<RunJob>;
     onRunState(listener: (state: RunJob) => void): () => void;
