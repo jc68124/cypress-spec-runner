@@ -1,5 +1,11 @@
 # @jc68124/cypress-spec-runner
 
+## 0.8.1
+
+### Patch Changes
+
+- 1929e34: Open history directly to test results, add a searchable presets screen, shorten rerun labels, and provide consistent loading and completion feedback for app actions.
+
 ## 0.8.0
 
 ### Minor Changes
