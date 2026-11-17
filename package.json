@@ -29,6 +29,7 @@
         "test": "tsc6 -p tsconfig.electron.json && node --test --test-timeout=60000 out/tests/*.test.js",
         "prepack": "pnpm build",
         "smoke": "node scripts/package-smoke.cjs",
+        "test:cypress": "node scripts/cypress-integration.cjs",
         "changeset": "changeset",
         "version-packages": "changeset version && pnpm install --lockfile-only --ignore-scripts",
         "release": "changeset publish"

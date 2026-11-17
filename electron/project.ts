@@ -108,7 +108,7 @@ async function assertProject(directory: string): Promise<string> {
 export async function discoverSpecs(root: string, config?: ProjectConfig, resolved?: SpecDiscovery): Promise<string[]> {
     const settings = config ?? await defaults(root);
     const discovery = resolved ?? await specDiscovery(root, settings);
-    const files = await glob(discovery.specPattern, { cwd: root, dot: true, ignore: [...discovery.excludeSpecPattern.map(pattern => pattern.includes('/') ? pattern : '**/' + pattern), '**/node_modules/**', '.git/**'], nodir: true, follow: false, posix: true });
+    const files = await glob(discovery.specPattern, { cwd: root, dot: true, ignore: [...discovery.excludeSpecPattern.map(pattern => pattern.includes('/') ? pattern : '**/' + pattern), '**/node_modules/**', '.git/**', 'spec-runner-logs/**'], nodir: true, follow: false, posix: true });
     const canonicalRoot = await realpath(root);
     const safe: string[] = [];
     for (const file of files) {

@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { ProgressTracker } from '../shared/progress';
 import type { ProjectConfig, RunOptions, RunState } from '../shared/types';
 import { commandPreview, loadProject, runArguments, validateRun } from './project';
 import { stopWindowsProcess } from './windows-stop';
@@ -16,6 +18,7 @@ export class Runner {
     private log: RunLog | null = null;
     private completion: Promise<void> = Promise.resolve();
     private starting: Promise<void> = Promise.resolve();
+    private progressDirectory: string | undefined;
     private current: RunState = { status: 'idle', output: '', command: '', exitCode: null, outputTruncated: false, outputStartLine: 0, logPath: null, logError: null };
     constructor(private readonly publish: (state: RunState) => void, private readonly executable = process.env.SPEC_RUNNER_NODE ?? (process.versions.electron ? 'node' : process.execPath)) {}
 
@@ -61,6 +64,8 @@ export class Runner {
             const args = runArguments(options, config, env, artifacts?.directory, cypressPackage.version);
             const log = await RunLog.create(root, options.profile, artifacts?.directory);
             this.log = log;
+            this.progressDirectory = await mkdtemp(path.join(path.dirname(log.path), '.progress-')).catch(() => undefined);
+            const progress = new ProgressTracker(options.specs);
             const resume = () => { this.child?.stdout?.resume(); this.child?.stderr?.resume(); };
             log.stream.on('drain', resume);
             log.stream.on('error', error => {
@@ -68,10 +73,10 @@ export class Runner {
                 resume();
                 this.emit();
             });
-            this.current = { status: 'running', output: '', command: commandPreview(options, config, artifacts?.directory, cypressPackage.version), exitCode: null, outputTruncated: false, outputStartLine: 0, logPath: log.path, logError: null };
+            this.current = { status: 'running', output: '', command: commandPreview(options, config, artifacts?.directory, cypressPackage.version), exitCode: null, outputTruncated: false, outputStartLine: 0, logPath: log.path, logError: null, progress: progress.state };
             const child = spawn(this.executable, [cli, ...args], {
                 cwd: root,
-                env,
+                env: { ...env, SPEC_RUNNER_PROGRESS_DIR: this.progressDirectory },
                 shell: false,
                 windowsHide: true,
                 detached: process.platform !== 'win32',
@@ -79,8 +84,9 @@ export class Runner {
             });
             this.child = child;
             child.on('message', (message: any) => {
-                if (message?.type === 'results' && message.summary && typeof message.summary.total === 'number') this.current.results = message.summary;
+                if (message?.type === 'results' && message.summary && typeof message.summary.total === 'number') { this.current.results = message.summary; progress.complete(message.summary, message.completedSpecs); this.current.progress = progress.state; this.emit(); }
                 else if (message?.type === 'results-unavailable' && typeof message.message === 'string') this.current.resultsError = message.message.slice(0, 2000);
+                else if (message?.type === 'progress' && progress.apply(message.event)) { this.current.progress = progress.state; this.emit(); }
             });
             child.stdout?.setEncoding('utf8').on('data', (data: string) => this.append(data));
             child.stderr?.setEncoding('utf8').on('data', (data: string) => this.append(data));
@@ -96,9 +102,14 @@ export class Runner {
         } catch (error) {
             await this.log?.finish();
             this.log = null;
+            await this.cleanProgress();
             this.busy = false;
             throw new Error(`Cannot start run: ${(error as Error).message}`);
         } finally { ready(); }
+    }
+
+    private async cleanProgress(): Promise<void> {
+        if (this.progressDirectory) { const directory = this.progressDirectory; this.progressDirectory = undefined; await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => {}); }
     }
 
     private async finish(code: number | null, signal: NodeJS.Signals | null): Promise<void> {
@@ -112,6 +123,7 @@ export class Runner {
         this.timer = undefined;
         await this.log?.finish();
         this.log = null;
+        await this.cleanProgress();
         this.current.resultsError ??= !this.current.results ? (this.stopped ? 'Run stopped before structured results were available.' : 'Cypress exited without completed structured results. See the output or log.') : undefined;
         this.current.exitCode = code;
         this.current.status = this.stopped ? 'stopped' : code === 0 ? 'passed' : 'failed';

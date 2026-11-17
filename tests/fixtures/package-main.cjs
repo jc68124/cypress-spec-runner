@@ -26,6 +26,8 @@ BrowserWindow.prototype.loadFile=async function(...args){
             for(let index=0;index<150;index++){changed=await win.webContents.executeJavaScript("!!document.querySelector('[aria-label=\"Spec changes detected\"]')");if(changed)break;await new Promise(resolve=>setTimeout(resolve,100));}
             if(!changed)throw Error('Filesystem edit did not reach the refresh indicator');
             result.historyCount=await execute('package-split-check.cjs');
+            for(const name of ['progress-pass.cy.ts','progress-failed.cy.ts'])fs.writeFileSync(path.join(root,'cypress/e2e',name),'');
+            result.historyCount=await execute('package-progress-check.cjs');
             if(await win.webContents.executeJavaScript("!!document.querySelector('[aria-label=\"Spec changes detected\"]')"))throw Error('Refresh did not clear change indicator');
             const metadata=fs.readFileSync(path.join(root,'spec-runner-logs',result.id,'run.json'),'utf8');
             if(metadata.includes('raw_config_secret_do_not_store')||metadata.includes('"command"')||metadata.includes('"output"'))throw Error('History stored raw config, command or output');
