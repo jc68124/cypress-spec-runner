@@ -24,7 +24,11 @@ function eventData(event: string, args: any[]): ProgressEvent {
 export function withProgress(base: any, endpoint: Endpoint, originalFile: string | false): any {
     if (!base || typeof base !== 'object' || Array.isArray(base) || typeof base.then === 'function') throw Error('Cypress configuration must export an object.');
     const original = base.e2e?.setupNodeEvents;
+    const configDirectory = process.cwd();
     return { ...base, e2e: { ...base.e2e, async setupNodeEvents(this: unknown, on: On, config: any) {
+        // Cypress may reset cwd to its config directory between loading and setup.
+        // Retain the project's directory (including intentional changes made by its config).
+        process.chdir(configDirectory);
         const events = new Set(['before:run', 'before:spec', 'after:spec', 'after:run']), registered = new Set<string>();
         const decorate: On = (event, handler) => {
             if (!events.has(event) || typeof handler !== 'function') return on(event, handler);

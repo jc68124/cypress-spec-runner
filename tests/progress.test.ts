@@ -49,10 +49,11 @@ test('failed-spec selection includes compile errors, preserves original order, s
 
 test('progress wrapper loads CommonJS and ESM configs, preserves original hooks, async config, reporter options, tasks and hook errors', async t => {
     let close: (() => Promise<void>) | undefined;
-    t.after(async () => { await close?.(); });
+    const previousDirectory = process.cwd();
+    t.after(async () => { try { await close?.(); } finally { process.chdir(previousDirectory); } });
     const root = await fixture(t), events: ProgressEvent[] = [];
     const file = path.join(root, 'cypress.config.cjs');
-    await writeFile(file, `module.exports={reporter:'custom-reporter',reporterOptions:{kept:true},e2e:{async setupNodeEvents(on,config){if(config.configFile!==${JSON.stringify(file)})throw Error('Original configFile lost');on('task',{example:()=>42});on('before:spec',async spec=>{await new Promise(r=>setTimeout(r,5));return spec.relative;});on('after:spec',()=>{throw Error('User hook failure');});config.env.KEPT='value';return config;}}};`);
+    await writeFile(file, `if(process.cwd()!==${JSON.stringify(root)})throw Error('Original config cwd lost');module.exports={reporter:'custom-reporter',reporterOptions:{kept:true},e2e:{async setupNodeEvents(on,config){if(process.cwd()!==${JSON.stringify(root)})throw Error('Original setup cwd lost');if(config.configFile!==${JSON.stringify(file)})throw Error('Original configFile lost');on('task',{example:()=>42});on('before:spec',async spec=>{await new Promise(r=>setTimeout(r,5));return spec.relative;});on('after:spec',()=>{throw Error('User hook failure');});config.env.KEPT='value';return config;}}};`);
     const directory = path.join(root, 'bridge'); await mkdir(directory);
     const bridge = await progressConfig(root, { configFile: file }, directory, event => events.push(event)); close = bridge.close;
     const endpoint = /"port":(\d+),"token":"([a-f0-9]+)"/.exec(await readFile(bridge.configFile, 'utf8'))!;
@@ -61,6 +62,7 @@ test('progress wrapper loads CommonJS and ESM configs, preserves original hooks,
     const config = createRequire(path.join(root, 'package.json'))(bridge.configFile);
     assert.equal(config.reporter, 'custom-reporter'); assert.equal(config.reporterOptions.kept, true);
     const handlers = new Map<string, any>();
+    process.chdir(directory);
     const returned = await config.e2e.setupNodeEvents((event: string, handler: any) => handlers.set(event, handler), { configFile: bridge.configFile, env: {} });
     assert.equal(returned.configFile, bridge.configFile); assert.equal(returned.env.KEPT, 'value'); assert.equal(handlers.get('task').example(), 42);
     await handlers.get('before:run')({ specs: [{ relative: spec }] });

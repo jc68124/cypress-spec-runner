@@ -44,8 +44,8 @@ export async function progressConfig(root: string, options: { configFile?: strin
         const plugin = path.join(__dirname, 'cypress-progress-plugin.js');
         const endpoint = JSON.stringify({ port, token });
         const source = esm
-            ? `${original ? `import base from ${JSON.stringify(pathToFileURL(original).href)};` : 'const base = {};'}\nimport bridge from ${JSON.stringify(pathToFileURL(plugin).href)};\nexport default bridge.withProgress(base, ${endpoint}, ${JSON.stringify(original)});\n`
-            : `const base = ${original ? `require(${JSON.stringify(original)})` : '{}'};\nmodule.exports = require(${JSON.stringify(plugin)}).withProgress(base.default ?? base, ${endpoint}, ${JSON.stringify(original)});\n`;
+            ? `import bridge from ${JSON.stringify(pathToFileURL(plugin).href)};\nprocess.chdir(${JSON.stringify(root)});\n${original ? `const {default: base} = await import(${JSON.stringify(pathToFileURL(original).href)});` : 'const base = {};'}\nexport default bridge.withProgress(base, ${endpoint}, ${JSON.stringify(original)});\n`
+            : `process.chdir(${JSON.stringify(root)});\nconst base = ${original ? `require(${JSON.stringify(original)})` : '{}'};\nmodule.exports = require(${JSON.stringify(plugin)}).withProgress(base.default ?? base, ${endpoint}, ${JSON.stringify(original)});\n`;
         const configFile = path.join(directory, `cypress.config${extension}`);
         await writeFile(path.join(directory, 'package.json'), JSON.stringify({ type: esm ? 'module' : 'commonjs' }));
         await writeFile(configFile, source);
