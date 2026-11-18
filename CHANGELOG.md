@@ -1,5 +1,11 @@
 # @jc68124/cypress-spec-runner
 
+## 0.9.1
+
+### Patch Changes
+
+- bf4d88e: Keep progress summaries visible while compact spec rows follow the running file, pause following during manual browsing, show History as a coloured table with trash actions, and format durations consistently in seconds, minutes and hours.
+
 ## 0.9.0
 
 ### Minor Changes
