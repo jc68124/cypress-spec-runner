@@ -18,11 +18,14 @@ export class Runner {
     private log: RunLog | null = null;
     private completion: Promise<void> = Promise.resolve();
     private starting: Promise<void> = Promise.resolve();
+    private progress: ProgressTracker | undefined;
     private progressDirectory: string | undefined;
     private current: RunState = { status: 'idle', output: '', command: '', exitCode: null, outputTruncated: false, outputStartLine: 0, logPath: null, logError: null };
     constructor(private readonly publish: (state: RunState) => void, private readonly executable = process.env.SPEC_RUNNER_NODE ?? (process.versions.electron ? 'node' : process.execPath)) {}
 
     get state(): RunState { return { ...this.current }; }
+    liveSpecDetails(spec: string) { return this.progress?.specDetails(spec); }
+    hasLiveScreenshot(filename: string) { return this.progress?.hasScreenshot(filename) ?? false; }
     get active(): boolean { return this.busy; }
     async copyText(): Promise<string> {
         if (this.current.logError) {
@@ -54,6 +57,7 @@ export class Runner {
         let ready!: () => void;
         this.starting = new Promise<void>(resolve => { ready = resolve; });
         this.stopped = false;
+        this.progress = undefined;
         try {
             const options = await validateRun(root, input, snapshot, undefined, snapshot ? input.browserTarget : undefined);
             const requireFromProject = createRequire(path.join(root, 'package.json'));
@@ -65,7 +69,7 @@ export class Runner {
             const log = await RunLog.create(root, options.profile, artifacts?.directory);
             this.log = log;
             this.progressDirectory = await mkdtemp(path.join(path.dirname(log.path), '.progress-')).catch(() => undefined);
-            const progress = new ProgressTracker(options.specs);
+            const progress = this.progress = new ProgressTracker(options.specs);
             const resume = () => { this.child?.stdout?.resume(); this.child?.stderr?.resume(); };
             log.stream.on('drain', resume);
             log.stream.on('error', error => {

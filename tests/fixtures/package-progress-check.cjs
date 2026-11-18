@@ -3,18 +3,36 @@
     const specs = project.specs.filter(spec => spec.endsWith('progress-pass.cy.ts') || spec.endsWith('progress-failed.cy.ts'));
     if (specs.length !== 2) throw Error('Progress fixture specs were not discovered');
     const batch = await api.runMatrix({ specs, profiles: [project.config.defaultProfile, 'second'], browsers: ['electron', 'chrome'], headed: false, isolateArtifacts: false });
-    let partial = false;
+    let partial;
     async function finish(entries) {
         for (let attempt = 0; attempt < 600; attempt++) {
             const runs = await Promise.all(entries.map(run => api.state(run.id)));
-            partial ||= runs.some(run => run.status === 'running' && run.progress?.completed > 0 && !run.results);
+            if (!partial) {
+                for (const run of runs) {
+                    if (run.status !== 'running' || run.results) continue;
+                    const completed = run.progress?.specs.find(spec => spec.hasDetails);
+                    if (!completed) continue;
+                    const details = await api.liveSpecDetails(run.id, completed.spec);
+                    if (details?.tests[0]?.attempts === 2 && details.screenshots.length === 1) {
+                        partial = { run, screenshot: details.screenshots[0] };
+                        break;
+                    }
+                }
+            }
             if (runs.every(run => ['passed', 'failed', 'stopped'].includes(run.status))) return runs;
             await new Promise(resolve => setTimeout(resolve, 20));
         }
         throw Error('Progress fixture did not finish');
     }
     const original = await finish(batch.runs);
-    if (!partial || original.some(run => run.progress?.completed !== 2 || run.results?.failed !== 1)) throw Error('Packaged live progress or final results were lost');
+    if (!partial || original.some(run => run.progress?.completed !== 2 || run.results?.failed !== 1)) throw Error('Packaged live test details, screenshots or final results were lost');
+    const mismatch = original.find(run => run.id !== partial.run.id);
+    try {
+        await api.openArtifact(mismatch.id, partial.screenshot);
+        throw Error('Another run could open an unowned screenshot');
+    } catch (error) {
+        if (!String(error).includes('This artifact is unavailable')) throw error;
+    }
     await api.closeRun(original[0].id);
     const retry = await api.rerunBatch(batch.batch.id, 'failed-specs');
     if (retry.runs.length !== 4 || retry.runs.some(run => run.specs.length !== 1 || !run.specs[0].endsWith('failed.cy.ts') || run.isolateArtifacts !== false)) throw Error('Failed-spec group rerun lost its exact subset or artifact preference');

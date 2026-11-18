@@ -449,7 +449,7 @@ app.whenReady().then(async () => {
         const followProject=await window.specRunner.project();
         const followBatch=await window.specRunner.runMatrix({specs:followSpecs,profiles:[followProject.config.defaultProfile],browsers:['electron'],headed:false});
         const followJob=followBatch.runs[0];await wait(()=>tab(followJob.number));tab(followJob.number).click();button('Progress').click();
-        const progressAt=index=>({phase:'running',total:followSpecs.length,completed:index,currentSpec:followSpecs[index],passed:index,failed:0,pending:0,skipped:0,specs:followSpecs.map((spec,i)=>({spec,state:i<index?'passed':i===index?'running':'waiting',passed:i<index?1:0,failed:0,pending:0,skipped:0,duration:i<index?120000:0}))});
+        const progressAt=index=>({phase:'running',total:followSpecs.length,completed:index,currentSpec:followSpecs[index],passed:index,failed:0,pending:0,skipped:0,specs:followSpecs.map((spec,i)=>({spec,state:i<index?'passed':i===index?'running':'waiting',passed:i<index?1:0,failed:0,pending:0,skipped:0,duration:i<index?120000:0,hasDetails:i===26&&i<index}))});
         const publish=async index=>{await window.specRunnerFixture.progress(followJob.id,progressAt(index));await wait(()=>document.querySelector('[aria-label="Progress summary"]').textContent.includes(followSpecs[index]));};
         await publish(20);await wait(()=>document.querySelector('[aria-label="Spec file progress"]'));
         const progressList=document.querySelector('[aria-label="Spec file progress"]'),summary=document.querySelector('[aria-label="Progress summary"]');
@@ -470,6 +470,10 @@ app.whenReady().then(async () => {
         assert(Math.abs(progressList.scrollTop-readingTop)<1,'New progress moved a reader who scrolled up');
         followControl().click();await wait(()=>followControl().checked&&visible(27)&&visible(28));
         row(26).querySelector('summary').click();await wait(()=>!followControl().checked&&row(26).open);
+        await wait(()=>row(26).textContent.includes('Example › passes on retry · passed · 2 attempts · 1m 1s'));
+        assert((await window.specRunner.project()).liveSpecRead.spec===followSpecs[26]&&row(27).textContent.includes('Running'),'The completed spec did not load its tests while the next one ran');
+        button('Screenshot 1',row(26)).click();
+        await wait(async()=>(await window.specRunner.project()).artifactOpened.endsWith('/live.png'));
         const expandedTop=progressList.scrollTop;await publish(28);await new Promise(resolve=>setTimeout(resolve,100));
         assert(row(26).open&&Math.abs(progressList.scrollTop-expandedTop)<1,'Following interrupted an expanded completed spec');
         followControl().click();await wait(()=>followControl().checked&&visible(28)&&visible(29));

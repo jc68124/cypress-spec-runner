@@ -123,10 +123,26 @@ app.whenReady().then(async () => {
         const actual = await realpath(job.logPath); if (!actual.startsWith(await realpath(path.join(root, 'spec-runner-logs', id)) + path.sep)) throw Error('The saved log is outside its run folder.');
         if (location) shell.showItemInFolder(actual); else { const error = await shell.openPath(actual); if (error) throw Error(error); }
     });
+    const screenshotPattern = /\.(png|jpe?g|webp|gif)$/i;
+    const artifactPattern = /\.(png|jpe?g|webp|gif|mp4|webm)$/i;
+    async function artifactFile(filename: string, pattern: RegExp): Promise<string | undefined> {
+        if (!path.isAbsolute(filename) || !pattern.test(filename)) return undefined;
+        const actual = await realpath(filename).catch(() => undefined);
+        if (!actual || !pattern.test(actual) || !(await stat(actual).catch(() => undefined))?.isFile()) return undefined;
+        return actual;
+    }
+    handle('run:live-spec', async (id: string, spec: string) => {
+        const details = runs.liveSpecDetails(id, spec);
+        if (!details) return undefined;
+        const available = await Promise.all(details.screenshots.map(filename => artifactFile(filename, screenshotPattern)));
+        return { ...details, screenshots: details.screenshots.filter((_, index) => !!available[index]) };
+    });
     handle('run:artifact', async (id: string, filename: string, historical = false) => {
         const job = historical ? await history.detail(id) : runs.get(id);
-        if (!resultArtifacts(job.results).includes(filename) || !path.isAbsolute(filename) || !/\.(png|jpe?g|webp|gif|mp4|webm)$/i.test(filename) || !(await stat(filename)).isFile()) throw Error('This artifact is unavailable.');
-        const actual = await realpath(filename); if (!/\.(png|jpe?g|webp|gif|mp4|webm)$/i.test(actual)) throw Error('This artifact is not an image or video.');
+        const finalized = resultArtifacts(job.results).includes(filename);
+        if (!finalized && (historical || !runs.hasLiveScreenshot(id, filename))) throw Error('This artifact is unavailable.');
+        const actual = await artifactFile(filename, finalized ? artifactPattern : screenshotPattern);
+        if (!actual) throw Error('This artifact is unavailable.');
         const error = await shell.openPath(actual); if (error) throw Error(error);
     });
     handle('project:refresh', readProject);

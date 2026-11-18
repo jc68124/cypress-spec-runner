@@ -2,7 +2,7 @@
 
 ## Test results
 
-The **Runs** screen opens on **Progress**. It shows startup/queue state, the current spec, completed/total files, and pass/fail/pending/skipped counts from completed specs. Individual test details and artifacts replace the live file list after the full run finishes. Counts update at spec boundaries, rather than during each test. Stopped runs retain their last observed progress without claiming incomplete files passed.
+The **Runs** screen opens on **Progress**. It shows startup/queue state, the current spec, completed/total files, and pass/fail/pending/skipped counts from completed specs. Expand a completed spec to see its tests, retry counts, timings, errors and available screenshots while the remaining specs run. Test details and counts update when each spec finishes. Videos are available with the final results. If Cypress stops early, Progress still shows the completed specs it captured. Large runs may limit live detail while keeping the spec counts.
 
 The progress summary stays visible above a separately scrolling spec list. **Follow running spec** starts enabled and keeps the running file near the bottom with one upcoming file below it when both fit. Earlier results stay visible above; the first and last files use the available space without added padding. Scrolling, keyboard navigation or opening a spec pauses following so updates do not interrupt inspection. Tick the option again to return to the current file. The list readjusts when its size changes, and final counts remain visible while browsing completed results.
 

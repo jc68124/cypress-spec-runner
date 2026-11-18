@@ -51,6 +51,12 @@ function pump() {
 }
 contextBridge.exposeInMainWorld('specRunner', {
     saveLocal: async state=>{project={...project,local:{...state,revision:String(++revision)}};return {state:project.local,changedFiles:[]};},
+    liveSpecDetails: async (id, spec) => {
+        const row = jobs.find(job => job.id === id)?.progress?.specs.find(row => row.spec === spec);
+        if (!row?.hasDetails) return undefined;
+        project.liveSpecRead = { id, spec };
+        return { tests: [{ title: 'Example › passes on retry', state: 'passed', duration: 61000, attempts: 2 }], screenshots: ['/example-project/spec-runner-logs/' + id + '/live.png'] };
+    },
     chooseBrowser:async()=>'/example-project/browser executable',openArtifact:async(id,filename,historical)=>{project.artifactOpened=filename;project.artifactOpenedHistorical=historical;},
     history:async()=>{await action('history');return {entries:[...recent.values()]};},historyDetail:async id=>recent.get(id),historyLog:async id=>{project.historyLogOpened=id;},forgetHistory:async id=>{if(id)recent.delete(id);else recent.clear();},rerunHistory:async (id,mode)=>{const job=recent.get(id);project.lastHistoryRerun={id,mode};return runMatrix({specs:mode==='failed-specs'?job.results.specs.filter(spec=>spec.failed||spec.error).map(spec=>spec.spec):job.specs,profiles:[job.profileId],browsers:[job.browser],headed:job.headed});},
     notifications: async enabled => ({ enabled: !!enabled, supported: true }), testNotification: async () => { project.testNotificationSent = true; }, onNotificationStatus: () => () => {}, onNotificationClick: () => () => {},

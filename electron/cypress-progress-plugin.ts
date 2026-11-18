@@ -1,5 +1,6 @@
 // Loaded by Cypress's config process. Built-ins only; the consuming project needs no plugin setup.
 import http from 'node:http';
+import { normalizeLiveSpecDetails } from '../shared/results';
 import type { ProgressEvent } from '../shared/progress';
 type Endpoint = { port: number; token: string };
 type On = (event: string, handler: (...args: any[]) => any) => any;
@@ -18,8 +19,25 @@ function eventData(event: string, args: any[]): ProgressEvent {
     if (event === 'before:run') return Array.isArray(args[0]?.specs) ? { type: event, specs: args[0].specs.map((spec: any) => spec.relative).filter((spec: unknown) => typeof spec === 'string') } : { type: 'ready' };
     if (event === 'before:spec') return { type: event, spec: args[0]?.relative };
     if (event === 'after:run') return { type: event };
-    const result = args[1];
-    return { type: 'after:spec', spec: args[0]?.relative, ...(result ? { result: { passed: count(result.stats?.passes), failed: count(result.stats?.failures), pending: count(result.stats?.pending), skipped: count(result.stats?.skipped), duration: count(result.stats?.wallClockDuration ?? result.stats?.duration), ...(result.error ? { error: String(result.error).slice(0, 1000) } : {}) } } : {}) };
+    const result = args[1], spec = args[0]?.relative;
+    if (!result) return { type: 'after:spec', spec };
+    const stats = result.stats;
+    let details;
+    // A malformed or unusually large test payload must not discard this spec's summary.
+    try { details = normalizeLiveSpecDetails(result); } catch { /* Counts are still available. */ }
+    return {
+        type: 'after:spec',
+        spec,
+        result: {
+            passed: count(stats?.passes),
+            failed: count(stats?.failures),
+            pending: count(stats?.pending),
+            skipped: count(stats?.skipped),
+            duration: count(stats?.wallClockDuration ?? stats?.duration),
+            ...(result.error ? { error: String(result.error).slice(0, 1000) } : {}),
+        },
+        details,
+    };
 }
 export function withProgress(base: any, endpoint: Endpoint, originalFile: string | false): any {
     if (!base || typeof base !== 'object' || Array.isArray(base) || typeof base.then === 'function') throw Error('Cypress configuration must export an object.');

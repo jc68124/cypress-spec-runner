@@ -5,10 +5,11 @@ export function browserName(config: ProjectConfig, id: string): string { return 
 export interface RunPreset { id: string; name: string; options: MatrixOptions }
 export interface LocalState { revision: string; browserPaths: Record<string, string>; presets: RunPreset[] }
 export interface TestResult { title: string; state: string; duration: number; attempts: number; error?: string }
+export interface LiveSpecDetails { tests: TestResult[]; screenshots: string[]; truncated?: boolean }
 export interface SpecResult { spec: string; passed: number; failed: number; pending: number; skipped: number; duration: number; tests: TestResult[]; screenshots: string[]; video?: string; error?: string }
 export interface RunResults { total: number; passed: number; failed: number; pending: number; skipped: number; duration: number; specs: SpecResult[]; truncated?: boolean; error?: string; failedSpecs?: string[]; failedSpecsComplete?: boolean }
 export type RerunMode = 'all' | 'failed-specs';
-export interface ProgressSpec { spec: string; state: 'waiting' | 'running' | 'passed' | 'failed' | 'skipped' | 'unknown'; passed: number; failed: number; pending: number; skipped: number; duration: number; error?: string }
+export interface ProgressSpec { spec: string; state: 'waiting' | 'running' | 'passed' | 'failed' | 'skipped' | 'unknown'; passed: number; failed: number; pending: number; skipped: number; duration: number; error?: string; hasDetails?: boolean }
 export interface RunProgress { phase: 'starting' | 'running' | 'finishing' | 'complete' | 'unavailable'; total: number; completed: number; currentSpec?: string; passed: number; failed: number; pending: number; skipped: number; specs: ProgressSpec[]; truncated?: boolean; message?: string }
 export interface HistoryEntry { id: string; name: string; groupName: string; profileId: string; profileName: string; browser: string; browserName: string; status: 'passed' | 'failed' | 'stopped'; createdAt: number; finishedAt: number; duration: number; specCount: number; counts?: Pick<RunResults, 'total' | 'passed' | 'failed' | 'pending' | 'skipped'> }
 export interface HistoryDetail extends HistoryEntry { specs: string[]; headed: boolean; isolateArtifacts: boolean; notes: string; logPath: string | null; logError?: string | null; results?: RunResults; resultsError?: string }
@@ -118,6 +119,7 @@ export interface RunnerAPI {
     project(): Promise<Project>;
     saveLocal(state: LocalState): Promise<{ state: LocalState; changedFiles: string[] }>;
     chooseBrowser(): Promise<string | null>;
+    liveSpecDetails(id: string, spec: string): Promise<LiveSpecDetails | undefined>;
     openArtifact(id: string, filename: string, historical?: boolean): Promise<void>;
     history(): Promise<HistoryList>;
     historyDetail(id: string): Promise<HistoryDetail>;

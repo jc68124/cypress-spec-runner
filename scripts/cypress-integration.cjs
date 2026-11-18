@@ -27,8 +27,13 @@ async function main() {
             const originalFile = path.join(root, filename);
             const source = `${esm || ts ? "import fs from 'node:fs';import value from './helper.cjs';export default " : "const fs=require('node:fs'),value=require('./helper.cjs');module.exports="}{video:false,screenshotOnRunFailure:false,reporter:'junit',reporterOptions:{mochaFile:'junit/results-[hash].xml'},e2e:{supportFile:false,specPattern:'cypress/e2e/*.cy.js',async setupNodeEvents(on,config){if(process.cwd()!==${JSON.stringify(root)})throw Error('Original working directory changed: '+process.cwd());if(config.configFile!==${JSON.stringify(originalFile)})throw Error('Original config path changed');on('before:spec',async spec=>{await new Promise(resolve=>setTimeout(resolve,10));fs.appendFileSync('hooks.txt','before:'+spec.relative+'\\n');});on('after:spec',spec=>{fs.appendFileSync('hooks.txt','after:'+spec.relative+'\\n');});return {...config,env:{...config.env,FROM_SETUP:'kept',FROM_IMPORT:value}};}}};`;
             await fs.writeFile(originalFile, source); await fs.writeFile(path.join(root, 'hooks.txt'), '');
-            let observed = false;
-            runner = new Runner(state => { if (state.status === 'running' && state.progress?.completed === 1 && !state.results) observed = true; });
+            const liveDetails = new Map();
+            runner = new Runner(state => {
+                if (state.status !== 'running' || state.results) return;
+                for (const { spec, hasDetails } of state.progress?.specs ?? []) {
+                    if (hasDetails && !liveDetails.has(spec)) liveDetails.set(spec, runner.liveSpecDetails(spec));
+                }
+            });
             const config = { version: 1, name: 'Example Cypress project', configFile: filename, envFile: null, specPattern: ['cypress/e2e/*.cy.js'], excludeSpecPattern: [], profiles: [{ id: 'default', name: 'Default', args: [], env: {} }], defaultProfile: 'default' };
             await runner.run(root, { specs, profile: 'default', browser: 'electron', headed: false }, config);
             const limit = Date.now() + 90000;
@@ -36,7 +41,10 @@ async function main() {
             assert.equal(runner.active, false, 'Native Cypress did not finish');
             const diagnostic = `${runner.state.output}\n${JSON.stringify(runner.state.results ?? runner.state.resultsError)}`;
             assert.equal(runner.state.status, 'failed', diagnostic); assert.equal(runner.state.results?.failed, 1, diagnostic);
-            assert.equal(observed, true, 'No progress arrived before final results');
+            assert.equal(liveDetails.get(specs[0])?.tests[0]?.title, 'passes with the original setup configuration');
+            assert.equal(liveDetails.get(specs[0])?.tests[0]?.state, 'passed');
+            assert.equal(liveDetails.get(specs[1])?.tests[0]?.state, 'failed');
+            assert.match(liveDetails.get(specs[1])?.tests[0]?.error ?? '', /expected false to equal true/i);
             assert.equal(runner.state.progress.completed, 2); assert.equal(runner.state.progress.total, 2);
             assert.deepEqual(requireFailedSpecs(runner.state.results, specs), [specs[1]]);
             assert.equal(await fs.readFile(originalFile, 'utf8'), source, 'Original config was rewritten');
