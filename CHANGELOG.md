@@ -1,5 +1,11 @@
 # @jc68124/cypress-spec-runner
 
+## 0.10.1
+
+### Patch Changes
+
+- 14ff2b0: Use the Cypress Spec Runner icon for the Windows taskbar and reopen the same checkout from a new taskbar pin.
+
 ## 0.10.0
 
 ### Minor Changes
