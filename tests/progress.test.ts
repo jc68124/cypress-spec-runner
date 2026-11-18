@@ -7,7 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fixture } from './helpers';
 import { ProgressTracker, type ProgressEvent } from '../shared/progress';
-import { normalizeResults, failedSpecSelection, requireFailedSpecs } from '../shared/results';
+import { normalizeResults, normalizeLiveSpecDetails, failedSpecSelection, requireFailedSpecs } from '../shared/results';
 import { progressConfig } from '../electron/cypress-progress';
 import { withProgress } from '../electron/cypress-progress-plugin';
 import { Runner } from '../electron/runner';
@@ -33,6 +33,46 @@ test('progress tracks actual spec order, bounded rows, current work and idempote
     const many = new ProgressTracker(Array.from({ length: 1000 }, (_, index) => `${index}.cy.ts`));
     for (let index = 0; index < 1000; index++) many.apply({ type: 'after:spec', spec: `${index}.cy.ts`, result: done });
     assert.equal(many.state.specs.length, 500); assert.equal(many.state.completed, 1000); assert.equal(many.state.passed, 1000); assert.equal(many.state.truncated, true);
+});
+
+test('live details keep test outcomes out of progress snapshots and respect per-spec and per-run bounds', () => {
+    const filename = path.resolve('example.png');
+    const result = {
+        tests: Array.from({ length: 400 }, () => ({
+            title: ['Suite', 'A failed test'],
+            state: 'failed',
+            displayError: 'Failure detail'.repeat(600),
+            attempts: [{ wallClockDuration: 20 }, { wallClockDuration: 30 }],
+        })),
+        screenshots: [{ path: filename }, { path: 'x'.repeat(4200) }],
+        video: path.resolve('example.mp4'),
+    };
+    const details = normalizeLiveSpecDetails(result)!;
+    assert.equal(details.truncated, true);
+    assert.ok(details.tests.length > 0 && details.tests.length < 400);
+    assert.equal(details.tests[0].title, 'Suite › A failed test');
+    assert.equal(details.tests[0].attempts, 2);
+    assert.equal(details.tests[0].duration, 50);
+    assert.match(details.tests[0].error!, /Failure detail/);
+    assert.deepEqual(details.screenshots, [filename]);
+    assert.ok(!('video' in details));
+
+    const specs = Array.from({ length: 100 }, (_, index) => `${index}.cy.ts`);
+    const tracker = new ProgressTracker(specs);
+    assert.equal(tracker.apply({ type: 'after:spec', spec: '../unselected.cy.ts', result: done, details }), false);
+    assert.equal(tracker.specDetails('../unselected.cy.ts'), undefined);
+    for (const spec of specs) tracker.apply({ type: 'after:spec', spec, result: done, details });
+    assert.equal(tracker.state.completed, specs.length);
+    assert.equal(tracker.state.passed, specs.length);
+    assert.equal(tracker.state.specs[0].hasDetails, true);
+    assert.equal(tracker.state.specs.at(-1)?.hasDetails, undefined);
+    assert.ok(!JSON.stringify(tracker.state).includes('Failure detail'));
+    assert.ok(tracker.hasScreenshot(filename));
+    assert.ok(!tracker.hasScreenshot(path.resolve('unrelated.png')));
+    tracker.complete({ total: 100, passed: 100, failed: 0, pending: 0, skipped: 0, duration: 100, specs: [] });
+    assert.equal(tracker.specDetails(specs[0]), undefined);
+    assert.equal(tracker.state.specs[0].hasDetails, undefined);
+    assert.ok(!tracker.hasScreenshot(filename));
 });
 
 test('failed-spec selection includes compile errors, preserves original order, survives detail truncation and rejects incomplete or unowned paths', () => {
@@ -98,11 +138,13 @@ test('runner receives progress before final results, preserves stdout and cleans
     const root = await fixture(t);
     await writeFile(path.join(root, 'cypress.config.cjs'), 'module.exports={e2e:{}}');
     await writeFile(path.join(root, 'node_modules/cypress/package.json'), JSON.stringify({ name: 'cypress', version: '16.1.0', main: 'index.cjs' }));
-    await writeFile(path.join(root, 'node_modules/cypress/index.cjs'), `exports.cli={parseRunArguments:async()=>({configFile:'cypress.config.cjs'})};exports.run=async options=>{const config=require(options.configFile),handlers={};await config.e2e.setupNodeEvents((name,fn)=>handlers[name]=fn,{env:{},configFile:options.configFile});const spec={relative:${JSON.stringify(spec)}};await handlers['before:run']({specs:[spec]});await handlers['before:spec'](spec);console.log('project reporter output');await handlers['after:spec'](spec,{stats:{passes:1,failures:0,pending:0,skipped:0,wallClockDuration:20}});await new Promise(r=>setTimeout(r,200));await handlers['after:run']({});return {totalTests:1,totalPassed:1,totalFailed:0,totalPending:0,totalSkipped:0,totalDuration:20,runs:[{spec,stats:{passes:1,failures:0,pending:0,skipped:0}}]};};`);
+    await writeFile(path.join(root, 'node_modules/cypress/index.cjs'), `exports.cli={parseRunArguments:async()=>({configFile:'cypress.config.cjs'})};exports.run=async options=>{const config=require(options.configFile),handlers={};await config.e2e.setupNodeEvents((name,fn)=>handlers[name]=fn,{env:{},configFile:options.configFile});const spec={relative:${JSON.stringify(spec)}};await handlers['before:run']({specs:[spec]});await handlers['before:spec'](spec);console.log('project reporter output');await handlers['after:spec'](spec,{stats:{passes:1,failures:0,pending:0,skipped:0,wallClockDuration:20},tests:[{title:['Example','finishes early'],state:'passed',attempts:[{duration:20}]}]});await new Promise(r=>setTimeout(r,200));await handlers['after:run']({});return {totalTests:1,totalPassed:1,totalFailed:0,totalPending:0,totalSkipped:0,totalDuration:20,runs:[{spec,stats:{passes:1,failures:0,pending:0,skipped:0}}]};};`);
     const config = { ...await defaults(root), configFile: 'cypress.config.cjs' };
     await runner.run(root, { specs: [spec], browser: 'electron', profile: 'default', headed: false }, config);
     await until(() => runner.state.progress?.completed === 1);
     assert.equal(runner.active, true); assert.equal(runner.state.results, undefined); assert.equal(runner.state.progress!.passed, 1);
+    assert.equal(runner.state.progress!.specs[0].hasDetails, true);
+    assert.equal(runner.liveSpecDetails(spec)?.tests[0].title, 'Example › finishes early');
     await until(() => !runner.active);
     assert.equal(runner.state.status, 'passed'); assert.equal(runner.state.progress!.phase, 'complete'); assert.equal(runner.state.results!.passed, 1);
     assert.equal(await readFile(runner.state.logPath!, 'utf8'), 'project reporter output\n');

@@ -3,6 +3,7 @@ import type { NotificationStatus, RunnerAPI, RunBatch, RunJob } from '../shared/
 const api: RunnerAPI = {
     saveLocal: state => ipcRenderer.invoke('local:save', state),
     chooseBrowser: () => ipcRenderer.invoke('browser:choose'),
+    liveSpecDetails: (id, spec) => ipcRenderer.invoke('run:live-spec', id, spec),
     openArtifact: (id, filename, historical) => ipcRenderer.invoke('run:artifact', id, filename, historical),
     history: () => ipcRenderer.invoke('history:list'),
     historyDetail: id => ipcRenderer.invoke('history:detail', id),

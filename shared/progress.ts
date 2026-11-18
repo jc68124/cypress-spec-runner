@@ -1,6 +1,8 @@
-import type { ProgressSpec, RunProgress, RunResults } from './types';
+import { isLiveSpecDetails } from './results';
+import type { LiveSpecDetails, ProgressSpec, RunProgress, RunResults } from './types';
 
-export type ProgressEvent = { type: 'ready' | 'before:run' | 'before:spec' | 'after:spec' | 'after:run' | 'unavailable'; specs?: string[]; spec?: string; result?: Omit<ProgressSpec, 'state' | 'spec'>; message?: string };
+export type ProgressEvent = { type: 'ready' | 'before:run' | 'before:spec' | 'after:spec' | 'after:run' | 'unavailable'; specs?: string[]; spec?: string; result?: Omit<ProgressSpec, 'state' | 'spec' | 'hasDetails'>; details?: LiveSpecDetails; message?: string };
+const liveRunBytes = 2 * 1024 * 1024;
 const empty = { passed: 0, failed: 0, pending: 0, skipped: 0, duration: 0 };
 const path = (value: string) => value.replaceAll('\\', '/').replace(/^\.\//, '');
 export class ProgressTracker {
@@ -8,12 +10,28 @@ export class ProgressTracker {
     private planned: string[];
     private visible: Set<string>;
     private finished = new Map<string, ProgressSpec>();
+    private details = new Map<string, { value: LiveSpecDetails; bytes: number }>();
+    private detailBytes = 0;
     private counts = { passed: 0, failed: 0, pending: 0, skipped: 0 };
     private phase: RunProgress['phase'] = 'starting';
     private currentSpec: string | undefined;
     private message: string | undefined;
     private finalCompleted: number | undefined;
     constructor(specs: string[]) { this.planned = [...new Set(specs)]; this.allowed = new Set(this.planned); this.visible = new Set(this.planned.slice(0, 500)); }
+    specDetails(spec: string): LiveSpecDetails | undefined { return this.details.get(spec)?.value; }
+    hasScreenshot(filename: string): boolean {
+        for (const { value } of this.details.values()) if (value.screenshots.includes(filename)) return true;
+        return false;
+    }
+    private rememberDetails(spec: string, value: unknown): void {
+        if (!this.visible.has(spec) || !isLiveSpecDetails(value)) return;
+        const bytes = Buffer.byteLength(JSON.stringify(value));
+        const previous = this.details.get(spec)?.bytes ?? 0;
+        const total = this.detailBytes - previous + bytes;
+        if (total > liveRunBytes) return;
+        this.detailBytes = total;
+        this.details.set(spec, { value, bytes });
+    }
     apply(value: unknown): boolean {
         const event = value as ProgressEvent;
         if (!event || typeof event !== 'object') return false;
@@ -32,18 +50,25 @@ export class ProgressTracker {
         const raw = event.result;
         if (raw && ['passed', 'failed', 'pending', 'skipped', 'duration'].some(key => typeof raw[key as keyof typeof raw] !== 'number' || !Number.isFinite(raw[key as keyof typeof raw]) || (raw[key as keyof typeof raw] as number) < 0)) return false;
         const result: ProgressSpec = { ...empty, ...(raw ? { passed: raw.passed, failed: raw.failed, pending: raw.pending, skipped: raw.skipped, duration: raw.duration } : {}), spec, state: !raw ? 'unknown' : raw.failed || raw.error ? 'failed' : raw.passed ? 'passed' : 'skipped', ...(raw?.error && this.visible.has(spec) ? { error: String(raw.error).slice(0, 1000) } : {}) };
+        if (raw) this.rememberDetails(spec, event.details);
         const old = this.finished.get(spec);
         for (const key of ['passed', 'failed', 'pending', 'skipped'] as const) this.counts[key] += result[key] - (old?.[key] ?? 0);
         this.finished.set(spec, result); if (this.currentSpec === spec) this.currentSpec = undefined; return true;
     }
     complete(results: RunResults, completedSpecs?: number): void {
         this.phase = 'complete'; this.currentSpec = undefined;
+        this.details.clear();
+        this.detailBytes = 0;
         if (Number.isInteger(completedSpecs) && completedSpecs! >= 0) this.finalCompleted = Math.min(completedSpecs!, this.planned.length);
         for (const result of results.specs) if (this.allowed.has(result.spec)) this.finished.set(result.spec, { ...empty, spec: result.spec, state: result.failed || result.error ? 'failed' : result.passed ? 'passed' : 'skipped', passed: result.passed, failed: result.failed, pending: result.pending, skipped: result.skipped, duration: result.duration, error: result.error });
         for (const key of ['passed', 'failed', 'pending', 'skipped'] as const) this.counts[key] = results[key];
     }
     get state(): RunProgress {
         return { phase: this.phase, total: this.planned.length, completed: this.finalCompleted ?? this.finished.size, currentSpec: this.currentSpec, ...this.counts, message: this.message,
-            specs: this.planned.slice(0, 500).map(spec => this.finished.get(spec) ?? { ...empty, spec, state: spec === this.currentSpec ? 'running' : 'waiting' }), ...(this.planned.length > 500 ? { truncated: true } : {}) };
+            specs: this.planned.slice(0, 500).map(spec => {
+                const finished = this.finished.get(spec);
+                if (finished) return this.details.has(spec) ? { ...finished, hasDetails: true } : finished;
+                return { ...empty, spec, state: spec === this.currentSpec ? 'running' : 'waiting' };
+            }), ...(this.planned.length > 500 ? { truncated: true } : {}) };
     }
 }

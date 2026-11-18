@@ -23,6 +23,8 @@ export class RunManager {
     get active(): boolean { return this.preparing > 0 || [...this.entries.values()].some(entry => pendingRun(entry.job)); }
     list(): RunJob[] { return [...this.entries.values()].map(entry => this.copy(entry.job)); }
     get(id: string): RunJob { return this.copy(this.entry(id).job); }
+    liveSpecDetails(id: string, spec: string) { return this.entry(id).runner.liveSpecDetails(spec); }
+    hasLiveScreenshot(id: string, filename: string) { return this.entry(id).runner.hasLiveScreenshot(filename); }
     async copyText(id: string): Promise<string> {
         const entry = this.entry(id);
         if (!entry.job.logPath) {
