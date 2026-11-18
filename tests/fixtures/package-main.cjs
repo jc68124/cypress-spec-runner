@@ -1,6 +1,6 @@
 const {app,BrowserWindow,shell,dialog,nativeImage,clipboard}=require('electron');
 const fs=require('node:fs'),path=require('node:path');
-const installed=process.env.SPEC_RUNNER_PACKAGE,root=process.env.SPEC_RUNNER_PROJECT;
+const installed=process.env.SPEC_RUNNER_PACKAGE,root=__dirname;
 const second=process.env.SPEC_RUNNER_SMOKE_PHASE==='history';
 const icon=nativeImage.createFromPath(path.join(installed,'assets',process.platform==='win32'?'icon.ico':'icon.png'));
 if(icon.isEmpty()||icon.getSize().width<16)throw Error('Packaged icon missing');
@@ -10,11 +10,32 @@ shell.openPath=async file=>{if(file.endsWith('.log')){openedLogs.push(file);retu
 dialog.showSaveDialog=async()=>{throw Error('Saved logs must open without a save dialog');};
 dialog.showOpenDialog=async()=>({canceled:false,filePaths:[path.join(root,'portable browser')]});
 dialog.showErrorBox=(title,message)=>{console.error(title,message);app.exit(1);};
+let taskbarDetails;
+if (process.platform === 'win32') {
+    const setAppDetails = BrowserWindow.prototype.setAppDetails;
+    const samePath = (left, right) => path.relative(fs.realpathSync.native(left), fs.realpathSync.native(right)) === '';
+    BrowserWindow.prototype.setAppDetails = function (details) {
+        if (this.isVisible()) throw Error('Taskbar details were set after showing the window');
+        if (details.appId !== 'CypressSpecRunner.Desktop' || details.relaunchDisplayName !== 'Cypress Spec Runner') {
+            throw Error('Windows taskbar app identity is wrong');
+        }
+        if (details.appIconIndex !== 0 || !samePath(details.appIconPath, path.join(installed, 'assets', 'icon.ico'))) {
+            throw Error('Windows taskbar details did not use the packaged icon');
+        }
+        const command = /^"([^"]+)" "([^"]+)" "--spec-runner-project=([^"]+)"$/.exec(details.relaunchCommand);
+        if (!command || !samePath(command[1], process.execPath) || !samePath(command[2], installed) || !samePath(command[3], root)) {
+            throw Error('Windows taskbar relaunch command did not use the app and checkout');
+        }
+        setAppDetails.call(this, details);
+        taskbarDetails = details;
+    };
+}
 const original=BrowserWindow.prototype.loadFile;
 BrowserWindow.prototype.loadFile=async function(...args){
     const loaded=await original.apply(this,args),win=this;
     setTimeout(async()=>{
         try{
+            if (process.platform === 'win32' && !taskbarDetails) throw Error('Windows taskbar icon was not configured');
             const execute=name=>win.webContents.executeJavaScript(fs.readFileSync(path.join(root,name),'utf8'));
             if(second){const value=await execute('package-history-check.cjs');if(!fs.existsSync(value.logPath)||!openedLogs.includes(value.logPath)||!openedArtifacts.length)throw Error('Historical log/artifacts unavailable after restart');console.log('HISTORY_REOPENED:'+JSON.stringify(value));app.exit(0);return;}
             const result=await execute('package-run-check.cjs');

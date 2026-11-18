@@ -18,9 +18,9 @@ import type { MatrixOptions, RunDetails } from '../shared/types';
 
 const appName = 'Cypress Spec Runner';
 app.setName(appName);
-const notificationAppId = 'CypressSpecRunner.Desktop';
+const appUserModelId = 'CypressSpecRunner.Desktop';
 if (process.platform === 'win32') {
-    app.setAppUserModelId(notificationAppId);
+    app.setAppUserModelId(appUserModelId);
     app.setToastActivatorCLSID('{DDA2B0C2-2485-46F1-A857-401C56E9424A}');
 }
 
@@ -29,8 +29,19 @@ let root: string;
 let saving = false;
 let quitting = false;
 let confirmingClose = false;
-const html = realpathSync.native(path.resolve(__dirname, '../../dist/index.html'));
-const icon = path.resolve(__dirname, '../../assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const appDirectory = path.resolve(__dirname, '../..');
+const html = realpathSync.native(path.join(appDirectory, 'dist/index.html'));
+const icon = path.join(appDirectory, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const projectSwitch = 'spec-runner-project';
+
+function quoteWindowsArgument(argument: string): string {
+    // Double trailing backslashes before the closing quote (for example, a drive root).
+    return '"' + argument.replace(/\\+$/, backslashes => backslashes + backslashes) + '"';
+}
+
+function windowsRelaunchArguments(projectRoot: string): string {
+    return [appDirectory, `--${projectSwitch}=${projectRoot}`].map(quoteWindowsArgument).join(' ');
+}
 let runs: RunManager;
 let history: RunHistory;
 let notificationError: string | undefined;
@@ -66,9 +77,9 @@ async function configureNotifications(enabled?: boolean) {
                 const directory = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', appName);
                 await mkdir(directory, { recursive: true });
                 if (generation !== notificationGeneration) return notificationStatus();
-                const written = shell.writeShortcutLink(path.join(directory, `${appName}.lnk`), 'create', { target: process.execPath, args: `"${path.resolve(__dirname, '../..')}"`, cwd: root, description: appName, icon, iconIndex: 0, appUserModelId: notificationAppId, toastActivatorClsid: app.toastActivatorCLSID });
+                const written = shell.writeShortcutLink(path.join(directory, `${appName}.lnk`), 'create', { target: process.execPath, args: windowsRelaunchArguments(root), cwd: root, description: appName, icon, iconIndex: 0, appUserModelId: appUserModelId, toastActivatorClsid: app.toastActivatorCLSID });
                 if (!written) throw Error('Could not register the Start menu entry.');
-                await registerNotificationIdentity(notificationAppId, appName, path.resolve(__dirname, '../../assets/icon.png'), app.toastActivatorCLSID);
+                await registerNotificationIdentity(appUserModelId, appName, path.join(appDirectory, 'assets/icon.png'), app.toastActivatorCLSID);
             }
             if (generation === notificationGeneration) notifications.enabled = true;
         } catch { if (generation === notificationGeneration) notificationError = 'Desktop notifications could not be enabled. Check notification permissions and try again.'; }
@@ -94,7 +105,8 @@ async function save(action: () => Promise<unknown>): Promise<unknown> {
 app.whenReady().then(async () => {
     nativeTheme.themeSource = 'dark';
     if (process.platform === 'darwin') app.dock?.setIcon(icon);
-    const project = await findProject([process.env.SPEC_RUNNER_PROJECT, process.cwd()]);
+    const projectFromShortcut = process.platform === 'win32' ? app.commandLine.getSwitchValue(projectSwitch) : undefined;
+    const project = await findProject([projectFromShortcut, process.env.SPEC_RUNNER_PROJECT, process.cwd()]);
     if (!project) throw Error('No Cypress project found. Start the runner from your project folder.');
     root = project.root;
     const specChanges = new SpecChanges(() => loadProject(root), changed => { if (window && !window.isDestroyed()) window.webContents.send('specs:changed', changed); });
@@ -188,8 +200,19 @@ app.whenReady().then(async () => {
         await clipboard.writeText(text);
     });
     window = new BrowserWindow({ width: 1440, height: 960, minWidth: 980, minHeight: 700, title: appName,
-        backgroundColor: '#09090b', autoHideMenuBar: true, icon,
+        backgroundColor: '#09090b', autoHideMenuBar: true, icon, show: process.platform !== 'win32',
         webPreferences: { preload: path.join(__dirname, 'preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    if (process.platform === 'win32') {
+        // The window icon and the Windows taskbar's relaunch icon are separate.
+        window.setAppDetails({
+            appId: appUserModelId,
+            appIconPath: icon,
+            appIconIndex: 0,
+            relaunchCommand: `${quoteWindowsArgument(process.execPath)} ${windowsRelaunchArguments(root)}`,
+            relaunchDisplayName: appName,
+        });
+        window.show();
+    }
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', (event, url) => { if (!isAppDocumentUrl(url, html)) event.preventDefault(); });
     window.on('close', event => { if (runs?.active && !quitting) { event.preventDefault(); app.quit(); } });

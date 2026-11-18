@@ -31,7 +31,7 @@ async function execute(executable, args, cwd, env = process.env) {
 }
 async function main() {
     const archive = path.resolve(process.argv[2] ?? archiveFilename(ownPackage));
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'spec-runner-consumer-'));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), process.platform === 'win32' ? 'spec runner consumer-' : 'spec-runner-consumer-'));
     try {
         await fs.mkdir(path.join(root, 'fake-cypress/bin'), { recursive: true });
         await fs.mkdir(path.join(root, 'cypress/e2e'), { recursive: true });
@@ -87,7 +87,13 @@ async function main() {
             assert.equal(args[args.indexOf('--browser') + 1], run.browser);
         }
         assert.equal(state.results.total, 1); assert.equal(state.results.specs[0].tests[0].attempts, 2);
-        const reopened = await execute(electron, [...(process.platform === 'linux' ? ['--no-sandbox', '--ozone-platform=headless'] : []), '--disable-gpu', harness], root, { ...env, SPEC_RUNNER_SMOKE_PHASE: 'history' });
+        const restartEnv = { ...env, SPEC_RUNNER_SMOKE_PHASE: 'history' };
+        const restartArgs = [...(process.platform === 'linux' ? ['--no-sandbox', '--ozone-platform=headless'] : []), '--disable-gpu', harness];
+        if (process.platform === 'win32') {
+            delete restartEnv.SPEC_RUNNER_PROJECT;
+            restartArgs.push(`--spec-runner-project=${root}`);
+        }
+        const reopened = await execute(electron, restartArgs, process.platform === 'win32' ? os.tmpdir() : root, restartEnv);
         assert.match(reopened, /HISTORY_REOPENED:/);
         console.log('PASS: packed package installed in a separate Cypress project, initialized, launched its real desktop/main/preload API, ran the project CLI with local environment values, saved the complete log, and opened its existing path with browser restrictions enforced and without consumer build tools. A four-run matrix validated atomic submission, queuing, renaming, immediate queued cancellation, retained totals and independent logs. A split matrix executed seven specs exactly once across four workers, and file changes reached the refresh indicator. Live progress before completion, failed-spec reruns for exact matrix targets and saved History, Module API results, custom browser channels/local bindings, local/shared presets, owned artifact actions and history across an app restart passed.');
     } finally { await fs.rm(root, { recursive: true, force: true }); }
