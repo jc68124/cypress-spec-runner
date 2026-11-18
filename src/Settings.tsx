@@ -4,12 +4,13 @@ import { availableBrowsers, browserName } from '../shared/types';
 import { Button, Help } from './ui';
 import { BrowserSettings, LocalBrowsers } from './BrowserSettings';
 import { JsonEditor } from './JsonEditor';
+import { schedulingChanged } from '../shared/runs';
 import { parseEditorJson, type JsonKind } from '../shared/json-editor';
 
-export function Settings({ project, disabled, onSave, browser, setBrowser, follow, setFollow, notify, setNotify, notificationState, testNotification, saveLocal }: {
+export function Settings({ project, disabled, runsPending, onSave, browser, setBrowser, follow, setFollow, notify, setNotify, notificationState, testNotification, saveLocal }: {
     saveLocal: (state: LocalState) => Promise<void>;
     notify: boolean; setNotify: (value: boolean) => void; notificationState: NotificationStatus; testNotification: () => Promise<void>;
-    project: Project; disabled: boolean; onSave: (config: ProjectConfig) => Promise<void>;
+    project: Project; disabled: boolean; runsPending: boolean; onSave: (config: ProjectConfig) => Promise<void>;
     browser: RunOptions['browser']; setBrowser: (browser: RunOptions['browser']) => void; follow: boolean; setFollow: (follow: boolean) => void;
 }) {
     const [draft, setDraft] = useState(project.config);
@@ -20,6 +21,8 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const busy = saving || disabled;
+    const schedulingDraftBlocked = runsPending && schedulingChanged(project.config, draft);
+    const saveBlocked = schedulingDraftBlocked || (runsPending && !project.initialized);
     const lines = (value: string) => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     function updateProfile(id: string, patch: Partial<RunProfile>) { setDraft(current => ({ ...current, profiles: current.profiles.map(profile => profile.id === id ? { ...profile, ...patch } : profile) })); }
     function addGroup() {
@@ -68,6 +71,7 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
         </section>
         <section className="settings-section space-y-4" aria-labelledby="scheduling-title">
             <h3 id="scheduling-title" className="font-semibold text-white">Run scheduling <Help label="About concurrency limits">Runs start only when the overall, profile, and shared environment group limits all allow it. Other profiles can start while a queued run waits. These limits apply to this app instance.</Help></h3>
+            {runsPending && <p role="status" className="text-xs text-amber-200">Run limits, group assignments and the profile and group lists can be changed once all submitted runs finish. Other settings can still be saved.</p>}
             <div className="max-w-xs"><label htmlFor="max-runs" className="field-label">Maximum simultaneous runs</label><input id="max-runs" type="number" min={1} max={8} step={1} disabled={busy} value={draft.maxConcurrentRuns ?? 2} onChange={event => setDraft({ ...draft, maxConcurrentRuns: Number(event.target.value) })} /></div>
             <div className="flex items-center justify-between gap-4"><h4 className="text-sm font-semibold text-white">Shared environment groups</h4><Button small disabled={busy} onClick={addGroup}>Add group</Button></div>
             <p className="field-description">Assign profiles that target the same system to one group. Its limit applies to their combined runs.</p>
@@ -97,7 +101,13 @@ export function Settings({ project, disabled, onSave, browser, setBrowser, follo
             <details><summary className="cursor-pointer text-sm text-zinc-300">Advanced discovery override</summary><label className="mt-4 flex items-center gap-3 text-sm"><input type="checkbox" checked={overrideDiscovery} disabled={busy} onChange={event => setOverrideDiscovery(event.target.checked)} />Override Cypress discovery</label>{overrideDiscovery && <div className="mt-4 grid gap-4 lg:grid-cols-2"><div><label htmlFor="spec-patterns" className="field-label">Include patterns</label><textarea id="spec-patterns" rows={4} disabled={busy} value={patterns} onBlur={() => setPatterns(lines(patterns).join('\n'))} onChange={event => setPatterns(event.target.value)} /></div><div><label htmlFor="exclude-patterns" className="field-label">Exclude patterns</label><textarea id="exclude-patterns" rows={4} disabled={busy} value={exclusions} onBlur={() => setExclusions(lines(exclusions).join('\n'))} onChange={event => setExclusions(event.target.value)} /></div></div>}</details>
         </section>
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
-        <div className="flex flex-wrap items-center justify-between gap-4"><p className="max-w-xl text-xs leading-5 text-zinc-400">Save writes shared project files. Commit the files listed in the save reminder to share your changes.</p><Button kind="primary" disabled={busy} onClick={() => save()}>{saving ? 'Saving…' : project.initialized ? 'Save project settings' : 'Save and finish setup'}</Button></div>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+            <p className="max-w-xl text-xs leading-5 text-zinc-400">
+                {saveBlocked ? 'Let submitted runs finish, or undo scheduling edits to save other changes.' :
+                    'Save writes shared project files. Commit the files listed in the save reminder to share your changes.'}
+            </p>
+            <Button kind="primary" disabled={busy || saveBlocked} onClick={() => save()}>{saving ? 'Saving…' : project.initialized ? 'Save project settings' : 'Save and finish setup'}</Button>
+        </div>
         <section className="settings-section space-y-4"><h3 className="font-semibold text-white">Personal preferences <span className="ml-2 text-xs font-normal text-zinc-400">Saved locally</span></h3><p className="field-description">These apply immediately for this checkout and do not need committing.</p>
             <div><label htmlFor="preferred-browser" className="field-label">Preferred browser</label><select id="preferred-browser" value={browser} onChange={event => setBrowser(event.target.value as RunOptions['browser'])}>{availableBrowsers(project.config).map(value => <option key={value} value={value}>{browserName(project.config, value)}</option>)}</select></div>
             <div className="space-y-2"><label className="flex items-center gap-3 text-sm"><input type="checkbox" aria-label="Notify when a run group finishes" checked={notify} disabled={!notificationState.supported} onChange={event => setNotify(event.target.checked)} />Notify when a run group finishes</label><p className="field-description">One desktop summary per finished group, including failures. This preference stays on this computer.</p>{!notificationState.supported && <p className="field-description">Desktop notifications are unavailable in this session.</p>}{notificationState.error && <p role="status" className="text-xs text-amber-200">{notificationState.error}</p>}<Button small aria-label="Send test notification" successLabel="Test notification sent" disabled={!notificationState.enabled} onClick={() => testNotification()}>Send test notification</Button></div>

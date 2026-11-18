@@ -12,7 +12,7 @@ import { isAppDocumentUrl } from './app-url';
 import { commandPreview, findProject, initializeProject, loadProject, saveCategories, saveConfig, validateRun } from './project';
 import { SpecChanges } from './spec-changes';
 import { RunManager } from './run-manager';
-import type { Category, ProjectConfig, RunOptions, SaveResult, RerunMode } from '../shared/types';
+import type { Category, LocalState, ProjectConfig, RunOptions, SaveResult, RerunMode } from '../shared/types';
 import { matrixRuns, validateMatrixTargets, validateRunDetails } from '../shared/runs';
 import type { MatrixOptions, RunDetails } from '../shared/types';
 
@@ -82,9 +82,12 @@ function handle(channel: string, handler: (...args: any[]) => unknown): void {
         return handler(...args);
     });
 }
+function requireNoSave(): void {
+    if (saving) throw Error('Wait for the current save to finish.');
+}
 async function save(action: () => Promise<unknown>): Promise<unknown> {
-    if (runs?.active) throw Error('Shared settings are locked while runs are active or queued. Finish or stop active runs and cancel queued runs first.');
-    if (saving) throw Error('Wait for the current save to finish before changing shared settings.');
+    requireNoSave();
+    if (runs.submitting) throw Error('Wait for the current run submission to finish before saving.');
     saving = true;
     try { return await action(); } finally { saving = false; }
 }
@@ -105,16 +108,17 @@ app.whenReady().then(async () => {
     handle('notifications:configure', configureNotifications);
     handle('notifications:test', () => { if (!notifications.enabled) throw Error('Enable desktop notifications first.'); showNotice({ batchId: '', title: appName, body: 'You will be notified when a run group finishes.' }); });
     handle('project:get', readProject);
-    handle('local:save', async (state: import('../shared/types').LocalState) => { if (saving) throw Error('Wait for the current save to finish.'); saving = true; try { return await saveLocal(root, state); } finally { saving = false; } });
+    handle('local:save', (state: LocalState) => save(() => saveLocal(root, state)));
     handle('browser:choose', async () => { const result = await dialog.showOpenDialog(window, { title: 'Choose browser executable', properties: process.platform === 'darwin' ? ['openFile', 'openDirectory'] : ['openFile'] }); return result.canceled ? null : result.filePaths[0] ?? null; });
     handle('history:list', () => history.list());
     handle('history:detail', (id: string) => history.detail(id));
     handle('history:forget', (id?: string) => history.forget(id));
     handle('history:rerun', async (id: string, mode: RerunMode = 'all') => {
-        if (saving) throw Error('Wait for the save to finish.');
+        requireNoSave();
         if (mode !== 'all' && mode !== 'failed-specs') throw Error('Choose the full run or failed specs.');
         const job = await history.detail(id), specs = mode === 'failed-specs' ? requireFailedSpecs(job.results, job.specs) : job.specs;
         const details = validateRunDetails({ name: job.name, notes: job.notes });
+        requireNoSave();
         const result = await runs.enqueueMatrix({ specs, profiles: [job.profileId], browsers: [job.browser], headed: job.headed, isolateArtifacts: job.isolateArtifacts });
         result.runs = result.runs.map(run => runs.update(run.id, details)); result.batch = runs.renameBatch(result.batch.id, `${job.name} (${mode === 'failed-specs' ? 'failed specs' : 'rerun'})`.slice(0, 100)); return result;
     });
@@ -145,21 +149,24 @@ app.whenReady().then(async () => {
         if (!actual) throw Error('This artifact is unavailable.');
         const error = await shell.openPath(actual); if (error) throw Error(error);
     });
-    handle('project:refresh', readProject);
-    handle('project:initialize', (config?: ProjectConfig) => save(() => updated(() => initializeProject(root, config))));
-    handle('config:save', (config: ProjectConfig, revision: string) => save(() => updated(() => saveConfig(root, config, revision))));
+    handle('project:refresh', () => { requireNoSave(); return readProject(); });
+    handle('project:initialize', (config?: ProjectConfig) => save(() => {
+        if (runs.active) throw Error('Finish active and queued runs before initializing the project.');
+        return updated(() => initializeProject(root, config));
+    }));
+    handle('config:save', (config: ProjectConfig, revision: string) => save(() => updated(() => saveConfig(root, config, revision, runs.active))));
     handle('categories:save', (categories: Category[], revision: string) => save(() => updated(() => saveCategories(root, categories, revision))));
     handle('run:preview', async (options: RunOptions) => { const project = await loadProject(root); return commandPreview(await validateRun(root, options, project.config, project.specs), project.config, undefined, project.cypressVersion); });
-    handle('run:start', (options: RunOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runs.enqueue(options); });
+    handle('run:start', (options: RunOptions) => { requireNoSave(); return runs.enqueue(options); });
     handle('matrix:preview', async (options: MatrixOptions) => {
         const combinations = matrixRuns(options), project = await loadProject(root);
         validateMatrixTargets(options, project.config);
         const validated = await Promise.all(combinations.map(option => validateRun(root, option, project.config, project.specs)));
         return validated.map(option => commandPreview(option, project.config, undefined, project.cypressVersion)).join('\n');
     });
-    handle('matrix:start', (options: MatrixOptions) => { if (saving) throw Error('Wait for the save to finish.'); return runs.enqueueMatrix(options); });
-    handle('run:rerun', (id: string, mode: RerunMode = 'all') => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerun(id, mode); });
-    handle('batch:rerun', (id: string, mode: 'all' | 'failed' | 'failed-specs') => { if (saving) throw Error('Wait for the save to finish.'); return runs.rerunBatch(id, mode); });
+    handle('matrix:start', (options: MatrixOptions) => { requireNoSave(); return runs.enqueueMatrix(options); });
+    handle('run:rerun', (id: string, mode: RerunMode = 'all') => { requireNoSave(); return runs.rerun(id, mode); });
+    handle('batch:rerun', (id: string, mode: 'all' | 'failed' | 'failed-specs') => { requireNoSave(); return runs.rerunBatch(id, mode); });
     handle('run:update', (id: string, details: RunDetails) => runs.update(id, details));
     handle('batch:list', () => runs.batches());
     handle('batch:rename', (id: string, name: string) => runs.renameBatch(id, name));

@@ -1,6 +1,21 @@
 import { availableBrowsers, type MatrixOptions, type ProjectConfig, type RunBatch, type RunDetails, type RunJob, type RunOptions } from './types';
 export const maxOpenRuns = 50;
 export const maxOpenBatches = 50;
+export const schedulingLockMessage = 'Run limits, environment group assignments and adding or removing profiles or groups are locked while runs are active or queued.';
+
+export function schedulingChanged(previous: ProjectConfig, next: ProjectConfig): boolean {
+    if ((previous.maxConcurrentRuns ?? 2) !== (next.maxConcurrentRuns ?? 2)) return true;
+    const groups = new Map((previous.concurrencyGroups ?? []).map(group => [group.id, group.maxConcurrentRuns]));
+    const nextGroups = next.concurrencyGroups ?? [];
+    if (groups.size !== nextGroups.length || nextGroups.some(group => groups.get(group.id) !== group.maxConcurrentRuns)) return true;
+
+    const profiles = new Map(previous.profiles.map(profile => [profile.id, profile]));
+    return profiles.size !== next.profiles.length || next.profiles.some(profile => {
+        const original = profiles.get(profile.id);
+        return !original || (original.maxConcurrentRuns ?? 1) !== (profile.maxConcurrentRuns ?? 1) || original.concurrencyGroup !== profile.concurrencyGroup;
+    });
+}
+
 export function plannedRunCount(specCount: number, profileCount: number, browserCount: number, mode: MatrixOptions['executionMode']): number {
     const targets = profileCount * browserCount;
     return mode === 'split' ? Math.min(specCount, targets) : targets;
