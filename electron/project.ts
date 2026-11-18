@@ -5,6 +5,7 @@ import path from 'node:path';
 import { glob } from 'glob';
 import { loadLocal } from './local-state';
 import { validatePresets } from '../shared/presets';
+import { schedulingChanged, schedulingLockMessage } from '../shared/runs';
 import { specDiscovery } from './discovery';
 import type { SpecDiscovery } from '../shared/types';
 import { availableBrowsers, browsers, type Category, type CategoryFile, type Project, type ProjectConfig, type RunOptions, type SaveResult } from '../shared/types';
@@ -157,9 +158,10 @@ export async function findProject(directories: (string | undefined)[]): Promise<
     }
     return null;
 }
-async function atomicSave(root: string, file: string, value: unknown, revision: string): Promise<void> {
+async function atomicSave(root: string, file: string, value: unknown, revision: string, checkCurrent?: (value: unknown) => void): Promise<void> {
     const current = await readJson(root, file);
     if ((current?.revision ?? 'missing') !== revision) throw Error(`${file} changed on disk. Refresh and reapply your changes.`);
+    checkCurrent?.(current?.value);
     const filename = path.join(root, file);
     await mkdir(path.dirname(filename), { recursive: true });
     const temporary = `${filename}.${randomUUID()}.tmp`;
@@ -170,9 +172,11 @@ export async function saveCategories(root: string, categories: Category[], revis
     await atomicSave(root, categoryPath, validateCategories({ version: 1, categories }), revision);
     return { project: await loadProject(root), changedFiles: [categoryPath] };
 }
-export async function saveConfig(root: string, config: ProjectConfig, revision: string): Promise<SaveResult> {
+export async function saveConfig(root: string, config: ProjectConfig, revision: string, preserveScheduling = false): Promise<SaveResult> {
     const validated = validateConfig(config);
-    await atomicSave(root, configPath, validated, revision);
+    await atomicSave(root, configPath, validated, revision, preserveScheduling ? current => {
+        if (schedulingChanged(validateConfig(current), validated)) throw Error(schedulingLockMessage);
+    } : undefined);
     const changedFiles = [configPath];
     if (validated.envFile) {
         let ignore = '';
@@ -222,8 +226,11 @@ export async function validateRun(root: string, value: unknown, snapshot?: Proje
     if (!project.config.profiles.some(profile => profile.id === options.profile) || !availableBrowsers(project.config).includes(options.browser) || typeof options.headed !== 'boolean') throw Error('Invalid profile, browser, or run options.');
     if (options.specs.some(spec => !project.specs.includes(spec))) throw Error('A selected spec no longer exists or does not match the configured patterns. Refresh your specs.');
     const custom = project.config.customBrowsers?.find(browser => browser.id === options.browser);
-    const paths = custom && custom.channel === undefined ? (await loadLocal(root)).browserPaths : {};
-    const browserTarget = trustedTarget ?? (custom ? custom.channel ?? (Object.hasOwn(paths, custom.id) ? paths[custom.id] : undefined) : options.browser);
+    let browserTarget = trustedTarget ?? (custom ? custom.channel : options.browser);
+    if (!browserTarget && custom) {
+        const { browserPaths } = await loadLocal(root);
+        if (Object.hasOwn(browserPaths, custom.id)) browserTarget = browserPaths[custom.id];
+    }
     if (!browserTarget) throw Error(`Set a local executable path for ${custom?.name ?? options.browser} in Settings before starting.`);
     if (custom && !custom.channel) { if (!path.isAbsolute(browserTarget) || !await stat(browserTarget).then(info => info.isFile() || (process.platform === 'darwin' && browserTarget.endsWith('.app') && info.isDirectory())).catch(() => false)) throw Error('The custom browser executable does not exist. Update its local path in Settings.'); }
     return { ...options, browserTarget, specs: [...new Set(options.specs)].sort() };

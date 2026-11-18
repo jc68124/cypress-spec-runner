@@ -7,6 +7,37 @@ import { configPath, categoryPath, defaults, discoverSpecs, findProject, initial
 import { runEnvironment } from '../electron/environment';
 
 import { fixture } from './helpers';
+test('protected config saves allow ordinary edits and reject changes to scheduling policy', async t => {
+    const root = await fixture(t);
+    const config = await defaults(root);
+    config.concurrencyGroups = [{ id: 'shared', name: 'Shared environment', maxConcurrentRuns: 1 }];
+    config.profiles[0].concurrencyGroup = 'shared';
+    await saveConfig(root, config, 'missing');
+
+    const current = await loadProject(root);
+    const next = {
+        ...current.config,
+        name: 'Updated project',
+        concurrencyGroups: current.config.concurrencyGroups!.map(group => ({ ...group, name: 'Renamed group' })),
+        profiles: current.config.profiles.map(profile => ({ ...profile, name: 'Renamed profile', baseUrl: 'https://example.test' })),
+    };
+    const saved = await saveConfig(root, next, current.configRevision, true);
+    assert.equal(saved.project.config.profiles[0].baseUrl, 'https://example.test');
+
+    const scheduleEdits = [
+        { ...next, maxConcurrentRuns: 3 },
+        { ...next, concurrencyGroups: next.concurrencyGroups.map(group => ({ ...group, maxConcurrentRuns: 2 })) },
+        { ...next, profiles: next.profiles.map(profile => ({ ...profile, maxConcurrentRuns: 2 })) },
+        { ...next, profiles: next.profiles.map(profile => ({ ...profile, concurrencyGroup: undefined })) },
+        { ...next, profiles: [...next.profiles, { id: 'extra', name: 'Extra profile', args: [], env: {} }] },
+    ];
+    for (const update of scheduleEdits) {
+        await assert.rejects(saveConfig(root, update, saved.project.configRevision, true), /locked while runs are active or queued/);
+    }
+    assert.equal((await loadProject(root)).configRevision, saved.project.configRevision);
+    assert.equal((await saveConfig(root, scheduleEdits[0], saved.project.configRevision)).project.config.maxConcurrentRuns, 3);
+});
+
 test('loading a project reads only discovered spec edit times and refreshes them after a local edit', async t => {
     const root = await fixture(t);
     const spec = 'cypress/e2e/features/Example.cy.ts';

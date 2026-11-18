@@ -20,7 +20,8 @@ export class RunManager {
     private nextNumber = 1;
     private stopping = new Map<string, Promise<void>>();
     constructor(private readonly root: string, private readonly publish: (job: RunJob) => void, private readonly publishBatch: (batch: RunBatch) => void = () => {}) {}
-    get active(): boolean { return this.preparing > 0 || [...this.entries.values()].some(entry => pendingRun(entry.job)); }
+    get submitting(): boolean { return this.preparing > 0; }
+    get active(): boolean { return this.submitting || [...this.entries.values()].some(entry => pendingRun(entry.job)); }
     list(): RunJob[] { return [...this.entries.values()].map(entry => this.copy(entry.job)); }
     get(id: string): RunJob { return this.copy(this.entry(id).job); }
     liveSpecDetails(id: string, spec: string) { return this.entry(id).runner.liveSpecDetails(spec); }
