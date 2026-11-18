@@ -327,6 +327,16 @@ app.whenReady().then(async () => {
         button('Run group details').click();await wait(()=>button('Rerun group'));button('Rerun group').click();await wait(()=>tab(12));button('Stop run').click();await wait(()=>tab(12).textContent.includes('Stopped'));
         await wait(()=>{const selected=tab(12).getBoundingClientRect(),list=document.querySelector('[aria-label="Run list"]').getBoundingClientRect();return selected.top>=list.top && selected.bottom<=list.bottom;});
         button('Configure run').click();await wait(()=>document.querySelector('[aria-label="Split specs across targets"]'));
+        const coveragePreview=()=>document.querySelector('[aria-label="Run configuration summary"]').textContent;
+        document.querySelector('[aria-label="Full suite per browser"]').click();
+        await wait(()=>coveragePreview().includes('2 specs per browser · 2 browsers · 4 runs'));
+        assert(coveragePreview().includes('4 spec executions total'),'Per-browser plan omitted total work');
+        button('Apply configuration',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));
+        await wait(()=>document.querySelector('[aria-label="Planned runs"]').textContent.includes('2 specs per browser · 2 browsers · 4 runs'));
+        button('Configure run').click();await wait(()=>document.querySelector('[aria-label="Full suite per profile"]'));
+        assert(document.querySelector('[aria-label="Full suite per browser"]').checked,'The configured coverage mode was not restored');
+        document.querySelector('[aria-label="Full suite per profile"]').click();
+        await wait(()=>coveragePreview().includes('2 specs per profile · 2 profiles · 4 runs'));
         document.querySelector('[aria-label="Split specs across targets"]').click();await wait(()=>document.querySelector('[aria-label="Run configuration summary"]').textContent.includes('once each'));
         assert(document.querySelector('[role=dialog]').textContent.includes('unused targets'),'Small split plan did not explain skipped targets');
         button('Apply configuration',document.querySelector('[role=dialog]')).click();await wait(()=>!document.querySelector('[role=dialog]'));

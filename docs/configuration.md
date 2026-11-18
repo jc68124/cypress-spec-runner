@@ -91,11 +91,18 @@ Shared and local presets, categories, spec refresh and most project settings rem
 
 ### Sharing work across targets
 
-Choose **Configure run → Split specs across targets** to divide the selected spec files between profile/browser pairs. For example, 100 specs, two profiles and two browsers create four runs with 25 files each, for 100 total spec executions rather than 400. Each file runs once and keeps all of its tests together. Select profiles where these specs are interchangeable: a split run does not verify every spec in every environment or browser.
+In **Configure run**, choose which targets need the full suite. With 100 specs, two profiles and two browsers, the modes work as follows.
 
-The split is deterministic and balanced by file count, not estimated duration. Targets alternate between profiles first so smaller selections can use independent profile slots; targets with no files are skipped. A large single spec is not split further. Existing overall, profile and shared-environment limits still control actual concurrency, so increase only the limits your environments support. This uses ordinary project-local Cypress processes without requiring Cypress Cloud parallelization.
+| Distribution | Coverage | Spec executions |
+| --- | --- | ---: |
+| **Repeat all specs on every target** | Every profile/browser pair runs all 100 specs. | 400 |
+| **Split specs across targets** | All four pairs share one copy of the suite, with 25 specs each. | 100 |
+| **Full suite per browser** | Each browser runs all 100 specs. The two profiles share the work within each browser, with 50 specs per run. | 200 |
+| **Full suite per profile** | Each profile runs all 100 specs. The two browsers share the work within each profile, with 50 specs per run. | 200 |
 
-The dialog shows run counts and the range of specs per run before applying. The sidebar and group details identify split mode, and matrix cells show assigned spec counts. The distribution mode is a local preference. Run submissions capture their assignments, so changing the next plan does not change queued runs.
+Split modes balance by spec file count. Each spec stays intact, and pairs with no assigned files are skipped. Use interchangeable profiles when you distribute work across profiles. Existing overall, profile and shared environment limits still control what can run at once.
+
+The dialog and sidebar show the planned runs. Matrix cells show the actual assigned file counts. Distribution is saved in local preferences and can be included in a preset. Submitted and rerun groups keep their original file assignments.
 
 ### Matrix overview
 

@@ -117,7 +117,7 @@ export class RunManager {
                 if (unused) this.closeBatch(unused.id);
                 else throw Error('Close a completed run group before adding more groups.');
             }
-            const batch: RunBatch = { id: randomUUID(), revision: 0, name: (name ?? `${executionMode === 'split' ? 'Split' : validated.length > 1 ? 'Matrix' : 'Run'} #${this.nextBatchNumber++}`).slice(0, 100),
+            const batch: RunBatch = { id: randomUUID(), revision: 0, name: (name ?? `${executionMode !== 'repeat' ? 'Split' : validated.length > 1 ? 'Matrix' : 'Run'} #${this.nextBatchNumber++}`).slice(0, 100),
                 createdAt: Date.now(), profiles: [...new Set(validated.map(options => options.profile))].map(id => ({ id, name: config.profiles.find(profile => profile.id === id)!.name })),
                 browsers: [...new Set(validated.map(options => options.browser))], browserNames: Object.fromEntries(validated.map(options => [options.browser, browserName(config, options.browser)])), specCount: new Set(validated.flatMap(options => options.specs)).size, executionMode, statuses: {}, targets: [] };
             const entries = validated.map((options, index) => {

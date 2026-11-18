@@ -1,8 +1,8 @@
 import type { RunBatch, RunJob } from '../shared/types';
-import { runLabels } from '../shared/runs';
+import { executionModeLabels, runLabels } from '../shared/runs';
 import { Button, Modal } from './ui';
 export function MatrixOverview({ batch, runs, onSelect, onClose }: { batch: RunBatch; runs: RunJob[]; onSelect: (run: RunJob) => void; onClose: () => void }) {
-    return <Modal title={`Matrix: ${batch.name}`} description={batch.executionMode === 'split' ? `${batch.specCount} specs shared across targets, each assigned once. Cells show the number of assigned files.` : 'Rows are profiles and columns are browsers. Choose an available result to open its output.'} onClose={onClose} actions={<Button onClick={onClose}>Done</Button>}>
+    return <Modal title={`Matrix: ${batch.name}`} description={`${executionModeLabels[batch.executionMode ?? 'repeat']} · Choose a cell to open that run. Cells show assigned spec counts.`} onClose={onClose} actions={<Button onClick={onClose}>Done</Button>}>
         <div className="max-h-80 overflow-auto rounded-lg border border-white/10"><table className="w-full border-collapse text-left text-xs"><caption className="sr-only">Profile and browser results for {batch.name}</caption><thead className="sticky top-0 bg-zinc-900"><tr><th scope="col" className="p-3">Profile</th>{batch.browsers.map(browser => <th key={browser} scope="col" className="p-3 capitalize">{batch.browserNames?.[browser] ?? browser}</th>)}</tr></thead><tbody>{batch.profiles.map(profile => <tr key={profile.id} className="border-t border-white/10"><th scope="row" className="max-w-48 break-words p-3 font-medium text-zinc-100">{profile.name}</th>{batch.browsers.map(browser => {
             const target = batch.targets.find(target => target.profileId === profile.id && target.browser === browser);
             const status = target && batch.statuses[target.id];

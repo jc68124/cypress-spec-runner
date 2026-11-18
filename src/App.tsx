@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Category, HistoryDetail, NotificationStatus, ExecutionMode, MatrixOptions, Project, ProjectConfig, RunOptions, RunJob, RunBatch, SaveResult, LocalState } from '../shared/types';
 import { availableBrowsers, browserName } from '../shared/types';
-import { mergeBatch, mergeRun, pendingRun, plannedRunCount } from '../shared/runs';
+import { isExecutionMode, mergeBatch, mergeRun, pendingRun, plannedRunCount } from '../shared/runs';
 import { RunOutput } from './RunOutput';
 import { selectionState, toggleSpecs } from '../shared/selection';
 import { sortSpecs, specSortOrders, type SpecSort } from '../shared/spec-sort';
@@ -12,6 +12,7 @@ import { Settings } from './Settings';
 import { Presets } from './Presets';
 import { History } from './History';
 import { RunSetup } from './RunSetup';
+import { RunPlanSummary } from './RunPlanSummary';
 type View = 'categories' | 'specs' | 'output' | 'settings' | 'history' | 'presets';
 type Preferences = { selected: string[]; profile: string; browser: RunOptions['browser']; headed: boolean; follow: boolean; specSort: SpecSort; profiles: string[]; browsers: RunOptions['browser'][]; notify: boolean; isolateArtifacts: boolean; executionMode: ExecutionMode };
 const initialPreferences: Preferences = { selected: [], profile: '', browser: 'chrome', headed: false, follow: true, specSort: 'name-asc', profiles: [], browsers: [], notify: false, isolateArtifacts: true, executionMode: 'repeat' };
@@ -65,7 +66,7 @@ export function App() {
                 profiles: profiles.length ? profiles : [profile], browsers: chosenBrowsers.length ? chosenBrowsers : [browser],
                 profile: next.config.profiles.some(profile => profile.id === saved.profile) ? saved.profile : next.config.defaultProfile,
                 browser: availableBrowsers(next.config).includes(saved.browser) ? saved.browser : availableBrowsers(next.config)[0], headed: !!saved.headed, follow: saved.follow !== false,
-                specSort: specSortOrders.includes(saved.specSort) ? saved.specSort : 'name-asc', notify: saved.notify === true, isolateArtifacts: saved.isolateArtifacts !== false, executionMode: saved.executionMode === 'split' ? 'split' : 'repeat' };
+                specSort: specSortOrders.includes(saved.specSort) ? saved.specSort : 'name-asc', notify: saved.notify === true, isolateArtifacts: saved.isolateArtifacts !== false, executionMode: isExecutionMode(saved.executionMode) ? saved.executionMode : 'repeat' };
         });
         setProject(next); setSpecsChanged(false);
         if (first && !next.initialized) setView('settings');
@@ -174,7 +175,7 @@ export function App() {
             </section>
             {!viewingSavedRun && <aside aria-label="Run controls" className="space-y-5 overflow-y-auto border-l border-white/10 bg-zinc-900/50 p-6"><div><div className="flex items-start justify-between"><div><h2 className="text-sm font-semibold text-white">Next run</h2><p className="mt-2 text-3xl font-semibold text-white">{selectedSpecs.length}<span className="ml-2 text-xs font-normal text-zinc-400">of {project.specs.length} specs</span></p></div><Button small kind="plain" disabled={!selectedSpecs.length} onClick={() => toggle(selectedSpecs, false)}>Clear</Button></div><Button small className="mt-3" disabled={!selectedSpecs.length} onClick={() => setReviewing(true)}>Review selected</Button></div><p className="text-xs leading-5 text-zinc-400">Shared specs count once. Each selected file runs all its tests.</p>
                 <div className="space-y-3 border-t border-white/10 pt-5"><h3 className="text-sm font-semibold text-white">Run targets</h3><p className="line-clamp-2 break-words text-xs leading-5 text-zinc-300" title={project.config.profiles.filter(profile => preferences.profiles.includes(profile.id)).map(profile => profile.name).join(', ')}>{project.config.profiles.filter(profile => preferences.profiles.includes(profile.id)).map(profile => profile.name).join(', ') || 'No profiles selected'}</p><p className="text-xs text-zinc-400">{preferences.browsers.map(id => browserName(project.config, id)).join(', ') || 'No browsers selected'} · {preferences.headed ? 'headed' : 'headless'}</p><Button small disabled={pending} onClick={() => setConfiguring(true)}>Configure run</Button></div>
-                <div className="space-y-3"><p role="status" aria-label="Planned runs" className="rounded-lg border border-white/10 bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">{preferences.executionMode === 'split' ? <>{selectedSpecs.length} specs split across <strong className="text-white">{plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</strong> · once each</> : <>{selectedSpecs.length} specs × {preferences.profiles.length} {preferences.profiles.length === 1 ? 'profile' : 'profiles'} × {preferences.browsers.length} {preferences.browsers.length === 1 ? 'browser' : 'browsers'} = <strong className="text-white">{plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</strong></>}</p>
+                <div className="space-y-3"><p role="status" aria-label="Planned runs" className="rounded-lg border border-white/10 bg-zinc-950 p-3 text-xs leading-5 text-zinc-300"><RunPlanSummary specCount={selectedSpecs.length} targets={options} /></p>
                     <Button kind="primary" className="w-full whitespace-normal" disabled={!preview || changingProject || !project.initialized} onClick={() => operation(async () => { const result = await window.specRunner.runMatrix(options); result.runs.forEach(acceptRun); acceptBatch(result.batch); setSelectedRun(result.runs[0]?.id ?? null); setView('output'); })}>Start {plannedRuns} {plannedRuns === 1 ? 'run' : 'runs'}</Button>
                     <Button className="w-full" successLabel="Copied commands" disabled={!preview || pending} onClick={() => operation(() => window.specRunner.copy(preview))}>{plannedRuns === 1 ? 'Copy command' : 'Copy commands'}</Button><p className="text-xs leading-5 text-zinc-500">Each combination gets its own output and log. Busy profiles queue automatically.</p>{!plannedRuns && <p className="text-xs text-amber-200">Choose at least one spec, profile and browser.</p>}{previewError && <p role="alert" className="text-xs text-red-300">{previewError}</p>}
                 </div>
