@@ -1,5 +1,17 @@
 # @jc68124/cypress-spec-runner
 
+## 0.10.0
+
+### Minor Changes
+
+- 53771e2: Add Full suite per browser and Full suite per profile distribution modes to split the work while preserving coverage on the selected axis.
+- 24a0861: Expand completed specs in Progress to see test outcomes, retries, durations, errors and available screenshots before the full run finishes.
+
+### Patch Changes
+
+- 92a19ec: Allow preset and category edits, spec refresh, and most project settings to be saved while runs are active or queued. Keep scheduling rules fixed until submitted runs finish.
+- 166a220: Open saved runs on a full-width History screen with room for test results, a separate Run details view, and a Back to History button that keeps the current filters.
+
 ## 0.9.1
 
 ### Patch Changes
