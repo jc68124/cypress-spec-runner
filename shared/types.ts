@@ -60,7 +60,7 @@ export interface Project {
 }
 export interface SaveResult { project: Project; changedFiles: string[] }
 export interface RunOptions { specs: string[]; profile: string; browser: Browser; headed: boolean; isolateArtifacts?: boolean; browserTarget?: string }
-export type ExecutionMode = 'repeat' | 'split';
+export type ExecutionMode = 'repeat' | 'split' | 'per-browser' | 'per-profile';
 export interface MatrixOptions { specs: string[]; profiles: string[]; browsers: Browser[]; headed: boolean; isolateArtifacts?: boolean; executionMode?: ExecutionMode }
 export interface RunDetails { name: string; notes: string }
 export interface RunBatch {

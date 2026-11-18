@@ -45,8 +45,14 @@ test('presets retain exact options, reject unsafe paths, and flag stale targets 
     assert.equal(presetProblems({ ...preset, options: { ...plan, profiles: ['removed'], browsers: ['removed'], specs: ['removed.cy.ts'] } }, config, [spec]).length, 3);
     assert.throws(() => validatePresets([{ ...preset, options: { ...plan, specs: ['../outside.cy.ts'] } }]), /Invalid preset/);
     assert.throws(() => validatePresets([preset, preset]), /unique/);
-    await saveConfig(root, { ...config, presets: [preset] }, 'missing'); assert.deepEqual((await loadProject(root)).config.presets, [preset]);
-    await saveLocal(root, { ...await loadLocal(root), presets: [preset] }); assert.deepEqual((await loadLocal(root)).presets, [preset]);
+    const coveragePresets = (['per-browser', 'per-profile'] as const).map(mode => ({
+        id: mode, name: mode, options: { ...plan, executionMode: mode },
+    }));
+    const presets = [preset, ...coveragePresets];
+    await saveConfig(root, { ...config, presets }, 'missing');
+    assert.deepEqual((await loadProject(root)).config.presets, presets);
+    await saveLocal(root, { ...await loadLocal(root), presets });
+    assert.deepEqual((await loadLocal(root)).presets, presets);
 });
 test('structured results preserve final outcomes, retries and artifacts without storing Cypress configuration', () => {
     const summary = normalizeResults(raw)!;
