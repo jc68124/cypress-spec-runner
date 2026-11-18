@@ -13,12 +13,18 @@ dialog.showErrorBox=(title,message)=>{console.error(title,message);app.exit(1);}
 let taskbarDetails;
 if (process.platform === 'win32') {
     const setAppDetails = BrowserWindow.prototype.setAppDetails;
+    const samePath = (left, right) => path.relative(fs.realpathSync.native(left), fs.realpathSync.native(right)) === '';
     BrowserWindow.prototype.setAppDetails = function (details) {
         if (this.isVisible()) throw Error('Taskbar details were set after showing the window');
-        if (details.appId !== 'CypressSpecRunner.Desktop' || details.relaunchDisplayName !== 'Cypress Spec Runner' ||
-            details.appIconPath !== path.join(installed, 'assets', 'icon.ico') || details.appIconIndex !== 0 ||
-            !details.relaunchCommand.includes(`"${installed}"`) || !details.relaunchCommand.includes(`"--spec-runner-project=${root}"`)) {
-            throw Error('Windows taskbar details did not use the packaged icon and checkout');
+        if (details.appId !== 'CypressSpecRunner.Desktop' || details.relaunchDisplayName !== 'Cypress Spec Runner') {
+            throw Error('Windows taskbar app identity is wrong');
+        }
+        if (details.appIconIndex !== 0 || !samePath(details.appIconPath, path.join(installed, 'assets', 'icon.ico'))) {
+            throw Error('Windows taskbar details did not use the packaged icon');
+        }
+        const command = /^"([^"]+)" "([^"]+)" "--spec-runner-project=([^"]+)"$/.exec(details.relaunchCommand);
+        if (!command || !samePath(command[1], process.execPath) || !samePath(command[2], installed) || !samePath(command[3], root)) {
+            throw Error('Windows taskbar relaunch command did not use the app and checkout');
         }
         setAppDetails.call(this, details);
         taskbarDetails = details;
