@@ -11,6 +11,7 @@ const paths = {
     rerun: 'M3 11a9 9 0 1 1 2 7M3 3v8h8',
     menu: 'M4 6h16M4 12h16M4 18h16',
     more: 'M5 12h.01M12 12h.01M19 12h.01',
+    trash: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7',
 };
 export function IconButton({ icon, label, className = '', onClick, successLabel, disabled, ...props }: ActionButtonProps & { icon: keyof typeof paths; label: string }) {
     const action = useButtonAction(onClick, successLabel);
