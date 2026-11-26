@@ -1,5 +1,11 @@
 # @jc68124/cypress-spec-runner
 
+## 0.11.0
+
+### Minor Changes
+
+- 2a7646e: Split a suite into a chosen number of runs or run each spec independently. Choose Unlimited for project, profile or shared environment concurrency limits.
+
 ## 0.10.1
 
 ### Patch Changes
