@@ -16,8 +16,8 @@
         "customBrowsers": {"type": "array", "maxItems": 50, "items": {"type": "object", "additionalProperties": false, "required": ["id", "name"], "properties": {"id": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,100}$"}, "name": {"type": "string", "minLength": 1, "maxLength": 100}, "channel": {"type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9-]*(?::[a-zA-Z][a-zA-Z0-9-]*)?$", "description": "Cypress browser/channel such as chromium or chrome:beta. Omit for a machine-local executable binding."}}}},
         "presets": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/preset"}},
         "defaultProfile": { "type": "string" },
-        "maxConcurrentRuns": {"type": "integer", "minimum": 1, "maximum": 8, "default": 2, "description": "Maximum runs executing simultaneously in this app instance."},
-        "concurrencyGroups": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "name", "maxConcurrentRuns"], "properties": {"id": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,100}$"}, "name": {"type": "string", "minLength": 1, "maxLength": 100}, "maxConcurrentRuns": {"type": "integer", "minimum": 1, "maximum": 8}}}},
+        "maxConcurrentRuns": {"$ref": "#/$defs/runLimit", "default": 2, "description": "Maximum runs executing simultaneously in this app instance."},
+        "concurrencyGroups": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "name", "maxConcurrentRuns"], "properties": {"id": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,100}$"}, "name": {"type": "string", "minLength": 1, "maxLength": 100}, "maxConcurrentRuns": {"$ref": "#/$defs/runLimit"}}}},
         "profiles": {
             "type": "array", "minItems": 1,
             "items": {
@@ -28,12 +28,12 @@
                     "name": { "type": "string", "minLength": 1, "maxLength": 100 },
                     "baseUrl": { "type": "string" },
                     "args": { "type": "array", "items": { "type": "string" } },
-                    "maxConcurrentRuns": {"type": "integer", "minimum": 1, "maximum": 8, "default": 1},
+                    "maxConcurrentRuns": {"$ref": "#/$defs/runLimit", "default": 1},
                     "concurrencyGroup": {"type": "string", "description": "ID of a configured shared concurrency group."},
                     "env": { "type": "object", "propertyNames": { "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$" }, "additionalProperties": { "type": "string" } }
                 }
             }
         }
     },
-    "$defs": {"preset": {"type": "object", "additionalProperties": false, "required": ["id", "name", "options"], "properties": {"id": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,100}$"}, "name": {"type": "string", "minLength": 1, "maxLength": 100}, "options": {"type": "object", "additionalProperties": false, "required": ["specs", "profiles", "browsers", "headed"], "properties": {"specs": {"type": "array", "minItems": 1, "maxItems": 10000, "uniqueItems": true, "items": {"type": "string"}}, "profiles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}, "browsers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}, "headed": {"type": "boolean"}, "isolateArtifacts": {"type": "boolean"}, "executionMode": {"enum": ["repeat", "split", "per-browser", "per-profile"]}}}}}}
+    "$defs": {"runLimit": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 8}, {"const": "unlimited"}]}, "preset": {"type": "object", "additionalProperties": false, "required": ["id", "name", "options"], "properties": {"id": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,100}$"}, "name": {"type": "string", "minLength": 1, "maxLength": 100}, "options": {"type": "object", "additionalProperties": false, "required": ["specs", "profiles", "browsers", "headed"], "properties": {"specs": {"type": "array", "minItems": 1, "maxItems": 10000, "uniqueItems": true, "items": {"type": "string"}}, "profiles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}, "browsers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}, "headed": {"type": "boolean"}, "isolateArtifacts": {"type": "boolean"}, "executionMode": {"enum": ["repeat", "split", "per-browser", "per-profile"]}, "splitRuns": {"oneOf": [{"type": "integer", "minimum": 1, "maximum": 50}, {"const": "per-spec"}]}}}}}}
 }

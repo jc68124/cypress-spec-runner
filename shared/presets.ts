@@ -10,7 +10,7 @@ export function validatePresets(value: unknown): RunPreset[] {
         matrixRuns(options);
         if (options.specs.length > 10000 || options.specs.some((spec: unknown) => typeof spec !== 'string' || !spec || spec.length > 1000 || spec.startsWith('/') || spec.includes('\\') || /[:,\[\]{}!*?"`$|<>^%;\x00\r\n]/.test(spec) || spec.split('/').some(part => !part || part === '..' || part === '.')) || typeof options.headed !== 'boolean' || (options.isolateArtifacts !== undefined && typeof options.isolateArtifacts !== 'boolean')) throw Error('Invalid preset options.');
         ids.add(preset.id); names.add(preset.name.trim().toLowerCase());
-        return { id: preset.id, name: preset.name.trim(), options: { specs: [...new Set<string>(options.specs)].sort(), profiles: [...options.profiles], browsers: [...options.browsers], headed: options.headed, isolateArtifacts: options.isolateArtifacts !== false, executionMode: options.executionMode ?? 'repeat' } };
+        return { id: preset.id, name: preset.name.trim(), options: { specs: [...new Set<string>(options.specs)].sort(), profiles: [...options.profiles], browsers: [...options.browsers], headed: options.headed, isolateArtifacts: options.isolateArtifacts !== false, executionMode: options.executionMode ?? 'repeat', ...(options.splitRuns === undefined ? {} : { splitRuns: options.splitRuns }) } };
     });
 }
 export function presetProblems(preset: RunPreset, config: ProjectConfig, specs: string[]): string[] {

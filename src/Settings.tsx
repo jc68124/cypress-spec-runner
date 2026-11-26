@@ -1,11 +1,23 @@
 import { useState } from 'react';
-import type { NotificationStatus, Project, ProjectConfig, RunProfile, RunOptions, LocalState } from '../shared/types';
+import type { ConcurrencyLimit, NotificationStatus, Project, ProjectConfig, RunProfile, RunOptions, LocalState } from '../shared/types';
 import { availableBrowsers, browserName } from '../shared/types';
 import { Button, Help } from './ui';
 import { BrowserSettings, LocalBrowsers } from './BrowserSettings';
 import { JsonEditor } from './JsonEditor';
 import { schedulingChanged } from '../shared/runs';
 import { parseEditorJson, type JsonKind } from '../shared/json-editor';
+
+function ConcurrencySelect({ id, value, disabled, onChange }: {
+    id: string; value: ConcurrencyLimit; disabled: boolean; onChange: (limit: ConcurrencyLimit) => void;
+}) {
+    return <select id={id} value={value} disabled={disabled} onChange={event => {
+        const limit = event.target.value;
+        onChange(limit === 'unlimited' ? limit : Number(limit));
+    }}>
+        {Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}
+        <option value="unlimited">Unlimited</option>
+    </select>;
+}
 
 export function Settings({ project, disabled, runsPending, onSave, browser, setBrowser, follow, setFollow, notify, setNotify, notificationState, testNotification, saveLocal }: {
     saveLocal: (state: LocalState) => Promise<void>;
@@ -72,12 +84,12 @@ export function Settings({ project, disabled, runsPending, onSave, browser, setB
         <section className="settings-section space-y-4" aria-labelledby="scheduling-title">
             <h3 id="scheduling-title" className="font-semibold text-white">Run scheduling <Help label="About concurrency limits">Runs start only when the overall, profile, and shared environment group limits all allow it. Other profiles can start while a queued run waits. These limits apply to this app instance.</Help></h3>
             {runsPending && <p role="status" className="text-xs text-amber-200">Run limits, group assignments and the profile and group lists can be changed once all submitted runs finish. Other settings can still be saved.</p>}
-            <div className="max-w-xs"><label htmlFor="max-runs" className="field-label">Maximum simultaneous runs</label><input id="max-runs" type="number" min={1} max={8} step={1} disabled={busy} value={draft.maxConcurrentRuns ?? 2} onChange={event => setDraft({ ...draft, maxConcurrentRuns: Number(event.target.value) })} /></div>
+            <div className="max-w-xs"><label htmlFor="max-runs" className="field-label">Maximum simultaneous runs</label><ConcurrencySelect id="max-runs" disabled={busy} value={draft.maxConcurrentRuns ?? 2} onChange={maxConcurrentRuns => setDraft({ ...draft, maxConcurrentRuns })} /></div>
             <div className="flex items-center justify-between gap-4"><h4 className="text-sm font-semibold text-white">Shared environment groups</h4><Button small disabled={busy} onClick={addGroup}>Add group</Button></div>
             <p className="field-description">Assign profiles that target the same system to one group. Its limit applies to their combined runs.</p>
             {(draft.concurrencyGroups ?? []).map(group => <div key={group.id} className="grid items-end gap-3 rounded-lg border border-white/10 p-3 md:grid-cols-[minmax(0,1fr)_8rem_auto]">
                 <div><label htmlFor={`group-name-${group.id}`} className="field-label">Group name</label><input id={`group-name-${group.id}`} disabled={busy} value={group.name} onChange={event => setDraft(current => ({ ...current, concurrencyGroups: current.concurrencyGroups!.map(item => item.id === group.id ? { ...item, name: event.target.value } : item) }))} /></div>
-                <div><label htmlFor={`group-limit-${group.id}`} className="field-label">Run limit</label><input id={`group-limit-${group.id}`} type="number" min={1} max={8} step={1} disabled={busy} value={group.maxConcurrentRuns} onChange={event => setDraft(current => ({ ...current, concurrencyGroups: current.concurrencyGroups!.map(item => item.id === group.id ? { ...item, maxConcurrentRuns: Number(event.target.value) } : item) }))} /></div>
+                <div><label htmlFor={`group-limit-${group.id}`} className="field-label">Run limit</label><ConcurrencySelect id={`group-limit-${group.id}`} disabled={busy} value={group.maxConcurrentRuns} onChange={maxConcurrentRuns => setDraft(current => ({ ...current, concurrencyGroups: current.concurrencyGroups!.map(item => item.id === group.id ? { ...item, maxConcurrentRuns } : item) }))} /></div>
                 <Button small kind="plain" disabled={busy} onClick={() => setDraft(current => ({ ...current, concurrencyGroups: current.concurrencyGroups!.filter(item => item.id !== group.id), profiles: current.profiles.map(profile => profile.concurrencyGroup === group.id ? { ...profile, concurrencyGroup: undefined } : profile) }))}>Remove group</Button>
             </div>)}
         </section>
@@ -85,7 +97,7 @@ export function Settings({ project, disabled, runsPending, onSave, browser, setB
             <div className="flex items-center justify-between gap-4"><h3 id="profiles-title" className="font-semibold text-white">Run profiles <Help label="About run profiles">Profiles describe how Cypress starts: base URL, extra arguments, and environment variables. Create profiles for the environments your project uses.</Help></h3><Button small disabled={busy} onClick={addProfile}>Add profile</Button></div>
             {draft.profiles.map(profile => <div key={profile.id} className="space-y-4 rounded-lg border border-white/10 p-4">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3"><div><label htmlFor={`name-${profile.id}`} className="field-label">Profile name</label><input id={`name-${profile.id}`} disabled={busy} value={profile.name} onChange={event => updateProfile(profile.id, { name: event.target.value })} /></div><Button small kind="plain" disabled={busy || draft.profiles.length === 1} onClick={() => setDraft(current => ({ ...current, profiles: current.profiles.filter(item => item.id !== profile.id), defaultProfile: current.defaultProfile === profile.id ? current.profiles.find(item => item.id !== profile.id)!.id : current.defaultProfile }))}>Remove profile</Button></div>
-                <div className="grid gap-4 md:grid-cols-2"><div><label htmlFor={`profile-limit-${profile.id}`} className="field-label">Maximum simultaneous runs</label><input id={`profile-limit-${profile.id}`} type="number" min={1} max={8} step={1} disabled={busy} value={profile.maxConcurrentRuns ?? 1} onChange={event => updateProfile(profile.id, { maxConcurrentRuns: Number(event.target.value) })} /></div>
+                <div className="grid gap-4 md:grid-cols-2"><div><label htmlFor={`profile-limit-${profile.id}`} className="field-label">Maximum simultaneous runs</label><ConcurrencySelect id={`profile-limit-${profile.id}`} disabled={busy} value={profile.maxConcurrentRuns ?? 1} onChange={maxConcurrentRuns => updateProfile(profile.id, { maxConcurrentRuns })} /></div>
                 <div><label htmlFor={`profile-group-${profile.id}`} className="field-label">Shared environment group</label><select id={`profile-group-${profile.id}`} disabled={busy} value={profile.concurrencyGroup ?? ''} onChange={event => updateProfile(profile.id, { concurrencyGroup: event.target.value || undefined })}><option value="">No shared group</option>{draft.concurrencyGroups?.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></div></div>
                 <div><label htmlFor={`url-${profile.id}`} className="field-label">Base URL <span className="font-normal text-zinc-500">(optional)</span></label><input id={`url-${profile.id}`} disabled={busy} value={profile.baseUrl ?? ''} placeholder="https://app.example.test or ${BASE_URL}" onChange={event => updateProfile(profile.id, { baseUrl: event.target.value })} /><p className="field-description mt-2">Leave blank to use the URL from the Cypress configuration. References such as {'${BASE_URL}'} use local environment values.</p></div>
                 <details className="rounded-lg bg-zinc-950/60 p-3"><summary className="cursor-pointer text-sm text-zinc-300">Advanced arguments and environment variables</summary><div className="mt-4 grid gap-4 lg:grid-cols-2">

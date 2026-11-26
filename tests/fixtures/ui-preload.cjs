@@ -27,9 +27,20 @@ function runMatrix(options) {
     const batch = { id: 'batch-' + (++groupSequence), revision: 0, name: (options.profiles.length * options.browsers.length > 1 ? 'Matrix #' : 'Run #') + groupSequence,
         createdAt: Date.now(), profiles: options.profiles.map(id => ({ id, name: project.config.profiles.find(profile => profile.id === id).name })), browsers: [...options.browsers], specCount: options.specs.length, executionMode: options.executionMode, statuses: {}, targets: [] };
     const specs = [...new Set(options.specs)].sort();
-    const pairs = options.executionMode === 'split' ? options.browsers.flatMap(browser=>options.profiles.map(profile=>({profile,browser}))).slice(0,specs.length) : options.profiles.flatMap(profile=>options.browsers.map(browser=>({profile,browser})));
-    const entries = pairs.map(({profile,browser},pairIndex) => {
-        const assigned = options.executionMode === 'split' ? specs.filter((_,index)=>index%pairs.length===pairIndex) : specs;
+    const pairs = options.executionMode === 'split'
+        ? options.browsers.flatMap(browser => options.profiles.map(profile => ({ profile, browser })))
+        : options.profiles.flatMap(profile => options.browsers.map(browser => ({ profile, browser })));
+    const suites = options.executionMode === 'split' ? [pairs]
+        : options.executionMode === 'per-browser' ? options.browsers.map(browser => pairs.filter(pair => pair.browser === browser))
+        : options.executionMode === 'per-profile' ? options.profiles.map(profile => pairs.filter(pair => pair.profile === profile))
+        : pairs.map(pair => [pair]);
+    const entries = suites.flatMap(targets => {
+        const requested = options.splitRuns === 'per-spec' ? specs.length : options.splitRuns ?? targets.length;
+        const count = Math.min(requested, specs.length);
+        return Array.from({ length: count }, (_, index) => ({
+            ...targets[index % targets.length], assigned: specs.filter((_, specIndex) => specIndex % count === index),
+        }));
+    }).map(({ profile, browser, assigned }) => {
         const number = ++sequence, id = 'run-' + number, profileName = project.config.profiles.find(item => item.id === profile).name;
         const job = { ...options, profile, browser, specs: assigned, id, number, revision: 0, batchId: batch.id, name: profileName + ' · ' + browser, notes: '', profileId: profile, profileName,
             status: 'queued', output: '', command: 'cypress run --e2e', exitCode: null, outputTruncated: false, outputStartLine: 0, logError: null,
@@ -40,11 +51,12 @@ function runMatrix(options) {
     groups.push(batch); jobs.push(...entries); batchCallback({ ...batch }); entries.forEach(emit); pump(); return { batch, runs: entries };
 }
 function pump() {
+    const cap = value => value === 'unlimited' ? Infinity : value;
     for (const job of jobs.filter(job => job.status === 'queued')) {
         const active = jobs.filter(job => ['running', 'stopping'].includes(job.status));
         const profile = project.config.profiles.find(profile => profile.id === job.profileId);
-        if (active.filter(job => job.profileId === profile.id).length >= (profile.maxConcurrentRuns ?? 1)) job.waitReason = 'Waiting for ' + profile.name;
-        else if (active.length >= (project.config.maxConcurrentRuns ?? 2)) job.waitReason = 'Waiting for a free run slot';
+        if (active.filter(job => job.profileId === profile.id).length >= cap(profile.maxConcurrentRuns ?? 1)) job.waitReason = 'Waiting for ' + profile.name;
+        else if (active.length >= cap(project.config.maxConcurrentRuns ?? 2)) job.waitReason = 'Waiting for a free run slot';
         else { job.status = 'running'; job.startedAt = Date.now(); job.waitReason = null; job.output = job.number === 1 ? 'Example output\n' : `Example output ${job.number}\n`; }
         emit(job);
     }

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fixture } from './helpers';
 import { defaults, saveConfig, loadProject, validateConfig, runArguments } from '../electron/project';
 import { RunManager } from '../electron/run-manager';
-import { pendingRun, maxOpenRuns } from '../shared/runs';
+import { pendingRun, maxOpenRuns, plannedConcurrency } from '../shared/runs';
 import type { ProjectConfig, RunOptions } from '../shared/types';
 
 const options: RunOptions = { specs: ['cypress/e2e/features/Example.cy.ts'], profile: 'a', browser: 'chrome', headed: false };
@@ -65,6 +65,43 @@ test('the overall cap reserves startup slots even when requests arrive concurren
     assert.equal(jobs.length, 3);
     assert.equal(manager.list().filter(run => run.status === 'queued').length, 1);
 });
+test('unlimited removes each scheduler cap independently and same-target parts rerun intact', async t => {
+    const cases = [
+        { limits: ['unlimited', 'unlimited', 'unlimited'], parallel: 3 },
+        { limits: [2, 'unlimited', 'unlimited'], parallel: 2 },
+        { limits: ['unlimited', 1, 'unlimited'], parallel: 1 },
+        { limits: ['unlimited', 'unlimited', 2], parallel: 2 },
+    ] as const;
+    for (const { limits: [overall, profile, group], parallel } of cases) {
+        await t.test(`${overall} overall, ${profile} per profile, ${group} per group`, async t => {
+            const { root, config, manager } = await setup(t, config => {
+                config.maxConcurrentRuns = overall;
+                config.profiles[0].maxConcurrentRuns = profile;
+                config.profiles[0].concurrencyGroup = 'shared';
+                config.concurrencyGroups = [{ id: 'shared', name: 'Shared', maxConcurrentRuns: group }];
+            });
+            const specs = [...options.specs];
+            for (const name of ['Another', 'Third']) {
+                const file = `cypress/e2e/features/${name}.cy.ts`;
+                await writeFile(path.join(root, file), '');
+                specs.push(file);
+            }
+            const result = await manager.enqueueMatrix({ specs, profiles: ['a'], browsers: ['chrome'], headed: false, splitRuns: 'per-spec' });
+            assert.equal(result.runs.length, 3);
+            assert.equal(new Set(result.runs.map(run => run.name)).size, 3);
+            assert.equal(result.runs.filter(run => run.status === 'running').length, parallel);
+            assert.equal(plannedConcurrency(result.runs.map(run => ({ profile: run.profileId })), config), parallel);
+
+            if (parallel === 3) {
+                for (const run of result.runs) await manager.stop(run.id);
+                const rerun = await manager.rerunBatch(result.batch.id, 'all');
+                assert.deepEqual(rerun.runs.map(run => run.specs), result.runs.map(run => run.specs));
+                assert.equal(rerun.runs.filter(run => run.status === 'running').length, parallel);
+            }
+        });
+    }
+});
+
 test('runs keep snapshots and independent output, logs and standard artifact directories', async t => {
     const { root, manager } = await setup(t, config => { config.profiles[0].maxConcurrentRuns = 2; });
     const first = await manager.enqueue(options);
