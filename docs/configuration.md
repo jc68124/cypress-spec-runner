@@ -66,7 +66,7 @@ Save the shared entry first. For an entry without `channel`, open **Personal pre
 
 ## Concurrent runs and environment limits
 
-Use **Settings → Run scheduling** to set `maxConcurrentRuns` (default **2**). Each profile has its own `maxConcurrentRuns` (default **1**). Values must be integers from 1 to 8. Existing configurations get these defaults without an initializer migration.
+Use **Settings → Run scheduling** to set `maxConcurrentRuns` (default **2**). Each profile has its own `maxConcurrentRuns` (default **1**). Choose **Unlimited** to remove a limit at the project, profile or group level. Use `"unlimited"` in JSON, or an integer from 1 to 8 for a fixed limit. The other configured limits still apply. A batch and the app’s open run list still hold at most 50 runs.
 
 Profiles that target the same environment can share a concurrency group. Add a group with a name and combined run limit, then assign the relevant profiles to it. For example:
 
@@ -102,11 +102,17 @@ In **Configure run**, choose which targets need the full suite. With 100 specs, 
 
 Split modes balance by spec file count. Each spec stays intact, and pairs with no assigned files are skipped. Use interchangeable profiles when you distribute work across profiles. Existing overall, profile and shared environment limits still control what can run at once.
 
-The dialog and sidebar show the planned runs. Matrix cells show the actual assigned file counts. Distribution is saved in local preferences and can be included in a preset. Submitted and rerun groups keep their original file assignments.
+Use **Split into runs** independently of coverage:
+
+- **Automatic (by target)** uses the original assignment, with at most one run per profile/browser pair.
+- **Split into N runs** divides each copy of the selection into up to N nonempty runs. For example, **Full suite per browser** with Chrome and Firefox and a split count of four creates eight runs if at least four specs are selected.
+- **One run per spec** creates one Cypress run per file in each copy. On one profile and browser, 20 selected specs create 20 runs with separate results and logs.
+
+The dialog previews both the planned runs and the maximum that can run together when the runner is idle. Matrix cells show every run for their profile and browser. The split is remembered locally and can be included in a saved preset as `splitRuns` (an integer or `"per-spec"`). Reruns preserve the original assignments.
 
 ### Matrix overview
 
-Use **View matrix** on a run group for a profile × browser table. Select an available cell to open that run. Cancelled and closed rows retain their result with a Row removed label; combinations not included in a partial rerun are marked Not included. The overview opens in a dialog so it does not reduce terminal space.
+Use **View matrix** on a run group for a profile × browser table. Select an available run in a cell to open its output. Cancelled and closed rows retain their result with a Row removed label; combinations not included in a partial rerun are marked Not included. The overview opens in a dialog so it does not reduce terminal space.
 
 ### Rerunning results
 

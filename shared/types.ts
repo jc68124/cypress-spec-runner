@@ -15,16 +15,19 @@ export interface HistoryEntry { id: string; name: string; groupName: string; pro
 export interface HistoryDetail extends HistoryEntry { specs: string[]; headed: boolean; isolateArtifacts: boolean; notes: string; logPath: string | null; logError?: string | null; results?: RunResults; resultsError?: string }
 export interface HistoryList { entries: HistoryEntry[]; error?: string }
 
+export type ConcurrencyLimit = number | 'unlimited';
+export type RunSplit = number | 'per-spec';
+
 export interface RunProfile {
     id: string;
     name: string;
     baseUrl?: string;
     args: string[];
     env: Record<string, string>;
-    maxConcurrentRuns?: number;
+    maxConcurrentRuns?: ConcurrencyLimit;
     concurrencyGroup?: string;
 }
-export interface ConcurrencyGroup { id: string; name: string; maxConcurrentRuns: number }
+export interface ConcurrencyGroup { id: string; name: string; maxConcurrentRuns: ConcurrencyLimit }
 export interface ProjectConfig {
     $schema?: string;
     version: 1;
@@ -36,7 +39,7 @@ export interface ProjectConfig {
     browsers?: Browser[];
     customBrowsers?: CustomBrowser[];
     presets?: RunPreset[];
-    maxConcurrentRuns?: number;
+    maxConcurrentRuns?: ConcurrencyLimit;
     concurrencyGroups?: ConcurrencyGroup[];
     profiles: RunProfile[];
     defaultProfile: string;
@@ -61,7 +64,7 @@ export interface Project {
 export interface SaveResult { project: Project; changedFiles: string[] }
 export interface RunOptions { specs: string[]; profile: string; browser: Browser; headed: boolean; isolateArtifacts?: boolean; browserTarget?: string }
 export type ExecutionMode = 'repeat' | 'split' | 'per-browser' | 'per-profile';
-export interface MatrixOptions { specs: string[]; profiles: string[]; browsers: Browser[]; headed: boolean; isolateArtifacts?: boolean; executionMode?: ExecutionMode }
+export interface MatrixOptions { specs: string[]; profiles: string[]; browsers: Browser[]; headed: boolean; isolateArtifacts?: boolean; executionMode?: ExecutionMode; splitRuns?: RunSplit }
 export interface RunDetails { name: string; notes: string }
 export interface RunBatch {
     id: string;

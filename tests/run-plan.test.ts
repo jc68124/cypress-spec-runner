@@ -56,3 +56,34 @@ test('short coverage plans skip empty pairs and rotate which target does the wor
     assert.equal(plannedRunCount(4, 3, 2, 'per-browser'), 6);
     assert.equal(plannedRunCount(1, 3, 2, 'per-profile'), 3);
 });
+
+test('extra runs split each coverage copy without duplicating or dropping specs', () => {
+    const oneTarget = { ...selection, profiles: ['a'], browsers: ['chrome'] };
+    const onePerSpec = matrixRuns({ ...oneTarget, splitRuns: 'per-spec' });
+    assert.equal(onePerSpec.length, selection.specs.length);
+    assert.deepEqual(onePerSpec.map(run => run.specs), selection.specs.map(spec => [spec]));
+    assert.ok(onePerSpec.every(run => run.profile === 'a' && run.browser === 'chrome'));
+    assert.deepEqual(matrixRuns({ ...oneTarget, splitRuns: 3 }).map(run => run.specs.length), [3, 2, 2]);
+
+    for (const [mode, key, values] of [
+        ['per-browser', 'browser', selection.browsers],
+        ['per-profile', 'profile', selection.profiles],
+    ] as const) {
+        const runs = matrixRuns({ ...selection, executionMode: mode, splitRuns: 4 });
+        assert.equal(runs.length, 8);
+        for (const value of values) {
+            const parts = runs.filter(run => run[key] === value);
+            assert.deepEqual(parts.flatMap(run => run.specs).sort(), selection.specs);
+            assert.deepEqual(parts.map(run => run.specs.length), [2, 2, 2, 1]);
+        }
+    }
+
+    const repeated = matrixRuns({ ...selection, splitRuns: 2 });
+    assert.equal(repeated.length, 8);
+    for (const profile of selection.profiles) for (const browser of selection.browsers) {
+        assert.deepEqual(repeated.filter(run => run.profile === profile && run.browser === browser).flatMap(run => run.specs).sort(), selection.specs);
+    }
+    assert.equal(matrixRuns({ ...oneTarget, splitRuns: 50 }).length, selection.specs.length);
+    assert.throws(() => matrixRuns({ ...selection, splitRuns: 0 }), /run count/);
+    assert.throws(() => matrixRuns({ ...oneTarget, splitRuns: 'per-spec', specs: Array.from({ length: 51 }, (_, i) => `${i}.cy.ts`) }), /51 runs.*at most 50/);
+});

@@ -46,7 +46,7 @@ test('presets retain exact options, reject unsafe paths, and flag stale targets 
     assert.throws(() => validatePresets([{ ...preset, options: { ...plan, specs: ['../outside.cy.ts'] } }]), /Invalid preset/);
     assert.throws(() => validatePresets([preset, preset]), /unique/);
     const coveragePresets = (['per-browser', 'per-profile'] as const).map(mode => ({
-        id: mode, name: mode, options: { ...plan, executionMode: mode },
+        id: mode, name: mode, options: { ...plan, executionMode: mode, splitRuns: mode === 'per-browser' ? 4 : 'per-spec' as const },
     }));
     const presets = [preset, ...coveragePresets];
     await saveConfig(root, { ...config, presets }, 'missing');

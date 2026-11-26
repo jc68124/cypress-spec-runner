@@ -6,7 +6,7 @@ import { commandPreview, loadProject, validateRun } from './project';
 import type { ExecutionMode, MatrixOptions, MatrixResult, ProjectConfig, RunBatch, RunDetails, RunJob, RunOptions, RunResults, RerunMode } from '../shared/types';
 import { failedSpecSelection, requireFailedSpecs } from '../shared/results';
 import { browserName } from '../shared/types';
-import { matrixRuns, validateMatrixTargets, maxOpenBatches, maxOpenRuns, pendingRun, validateRunDetails } from '../shared/runs';
+import { concurrencyCap, matrixRuns, validateMatrixTargets, maxOpenBatches, maxOpenRuns, pendingRun, validateRunDetails } from '../shared/runs';
 
 type Entry = { job: RunJob; runner: Runner; config: ProjectConfig; options: RunOptions };
 export class RunManager {
@@ -120,9 +120,21 @@ export class RunManager {
             const batch: RunBatch = { id: randomUUID(), revision: 0, name: (name ?? `${executionMode !== 'repeat' ? 'Split' : validated.length > 1 ? 'Matrix' : 'Run'} #${this.nextBatchNumber++}`).slice(0, 100),
                 createdAt: Date.now(), profiles: [...new Set(validated.map(options => options.profile))].map(id => ({ id, name: config.profiles.find(profile => profile.id === id)!.name })),
                 browsers: [...new Set(validated.map(options => options.browser))], browserNames: Object.fromEntries(validated.map(options => [options.browser, browserName(config, options.browser)])), specCount: new Set(validated.flatMap(options => options.specs)).size, executionMode, statuses: {}, targets: [] };
+            const pairKey = (options: RunOptions) => JSON.stringify([options.profile, options.browser]);
+            const pairCounts = new Map<string, number>();
+            for (const options of validated) {
+                const key = pairKey(options);
+                pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
+            }
+            const pairParts = new Map<string, number>();
             const entries = validated.map((options, index) => {
                 const id = randomUUID(), artifactDirectory = path.join(this.root, 'spec-runner-logs', id);
                 const profile = config.profiles.find(profile => profile.id === options.profile)!;
+                const browserLabel = browserName(config, options.browser);
+                const key = pairKey(options);
+                const part = (pairParts.get(key) ?? 0) + 1;
+                pairParts.set(key, part);
+                const suffix = pairCounts.get(key)! > 1 ? ` · Part ${part}` : '';
                 let entry: Entry;
                 const runner = new Runner(state => {
                     if (!this.entries.has(id)) return;
@@ -132,7 +144,7 @@ export class RunManager {
                     if (!runner.active) this.schedule();
                 });
                 entry = { config, options: structuredClone(options), runner, job: {
-                    id, revision: 0, number: this.nextNumber++, batchId: batch.id, name: `${profile.name.replace(/[\x00\r\n]/g, ' ').slice(0, 85)} · ${browserName(config, options.browser)}`.slice(0, 100), notes: '',
+                    id, revision: 0, number: this.nextNumber++, batchId: batch.id, name: `${profile.name.replace(/[\x00\r\n]/g, ' ').slice(0, 85)} · ${browserLabel}`.slice(0, 100 - suffix.length) + suffix, notes: '',
                     status: 'queued', profileId: profile.id, profileName: profile.name, browser: options.browser, browserName: browserName(config, options.browser), headed: options.headed, isolateArtifacts: options.isolateArtifacts !== false, specs: [...options.specs],
                     createdAt: batch.createdAt, startedAt: null, finishedAt: null, waitReason: null, artifactDirectory,
                     output: '', command: commandPreview(options, config, artifactDirectory, project.cypressVersion), exitCode: null,
@@ -154,15 +166,15 @@ export class RunManager {
         const running = [...this.entries.values()].filter(other => ['running', 'stopping'].includes(other.job.status));
         const profile = entry.config.profiles.find(profile => profile.id === entry.options.profile)!;
         const sameProfile = running.filter(other => other.options.profile === profile.id);
-        const profileCap = Math.min(profile.maxConcurrentRuns ?? 1, ...sameProfile.map(other => other.config.profiles.find(profile => profile.id === other.options.profile)!.maxConcurrentRuns ?? 1));
+        const profileCap = Math.min(concurrencyCap(profile.maxConcurrentRuns ?? 1), ...sameProfile.map(other => concurrencyCap(other.config.profiles.find(profile => profile.id === other.options.profile)!.maxConcurrentRuns ?? 1)));
         if (sameProfile.length >= profileCap) return `Waiting for ${profile.name}`;
         if (profile.concurrencyGroup) {
             const group = entry.config.concurrencyGroups!.find(group => group.id === profile.concurrencyGroup)!;
             const shared = running.filter(other => other.config.profiles.find(profile => profile.id === other.options.profile)!.concurrencyGroup === group.id);
-            const cap = Math.min(group.maxConcurrentRuns, ...shared.map(other => other.config.concurrencyGroups!.find(item => item.id === group.id)!.maxConcurrentRuns));
+            const cap = Math.min(concurrencyCap(group.maxConcurrentRuns), ...shared.map(other => concurrencyCap(other.config.concurrencyGroups!.find(item => item.id === group.id)!.maxConcurrentRuns)));
             if (shared.length >= cap) return `Waiting for ${group.name}`;
         }
-        const cap = Math.min(entry.config.maxConcurrentRuns ?? 2, ...running.map(other => other.config.maxConcurrentRuns ?? 2));
+        const cap = Math.min(concurrencyCap(entry.config.maxConcurrentRuns ?? 2), ...running.map(other => concurrencyCap(other.config.maxConcurrentRuns ?? 2)));
         return running.length >= cap ? 'Waiting for a free run slot' : null;
     }
     private schedule(): void {

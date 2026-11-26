@@ -5,7 +5,7 @@ import path from 'node:path';
 import { glob } from 'glob';
 import { loadLocal } from './local-state';
 import { validatePresets } from '../shared/presets';
-import { schedulingChanged, schedulingLockMessage } from '../shared/runs';
+import { isConcurrencyLimit, schedulingChanged, schedulingLockMessage } from '../shared/runs';
 import { specDiscovery } from './discovery';
 import type { SpecDiscovery } from '../shared/types';
 import { availableBrowsers, browsers, type Category, type CategoryFile, type Project, type ProjectConfig, type RunOptions, type SaveResult } from '../shared/types';
@@ -51,14 +51,13 @@ export function validateConfig(value: unknown): ProjectConfig {
     }
     if (config.browsers !== undefined && (!Array.isArray(config.browsers) || !config.browsers.length
         || config.browsers.some(browser => !browserIds.has(browser)) || new Set(config.browsers).size !== config.browsers.length)) throw Error('Choose at least one supported browser, without duplicates.');
-    const validLimit = (value: unknown) => Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 8;
-    if (config.maxConcurrentRuns !== undefined && !validLimit(config.maxConcurrentRuns)) throw Error('The overall concurrency limit must be an integer from 1 to 8.');
+    if (config.maxConcurrentRuns !== undefined && !isConcurrencyLimit(config.maxConcurrentRuns)) throw Error('The overall concurrency limit must be an integer from 1 to 8 or unlimited.');
     const groups = config.concurrencyGroups === undefined ? [] : config.concurrencyGroups;
     if (!Array.isArray(groups)) throw Error('Concurrency groups must be a list.');
     const groupIds = new Set<string>(), groupNames = new Set<string>();
     for (const group of groups) {
         if (!group || typeof group.id !== 'string' || !idPattern.test(group.id) || typeof group.name !== 'string' || !group.name.trim() || group.name.length > 100
-            || !validLimit(group.maxConcurrentRuns) || groupIds.has(group.id) || groupNames.has(group.name.trim().toLowerCase())) throw Error('Concurrency groups need unique IDs/names and limits from 1 to 8.');
+            || !isConcurrencyLimit(group.maxConcurrentRuns) || groupIds.has(group.id) || groupNames.has(group.name.trim().toLowerCase())) throw Error('Concurrency groups need unique IDs/names and limits from 1 to 8 or unlimited.');
         groupIds.add(group.id); groupNames.add(group.name.trim().toLowerCase());
     }
     if (!Array.isArray(config.profiles) || !config.profiles.length) throw Error('Create at least one run profile.');
@@ -68,7 +67,7 @@ export function validateConfig(value: unknown): ProjectConfig {
         if (!profile || typeof profile.id !== 'string' || !idPattern.test(profile.id) || typeof profile.name !== 'string' || !profile.name.trim() || profile.name.length > 100
             || ids.has(profile.id) || names.has(profile.name.trim().toLowerCase())) throw Error('Each profile needs a unique ID and name.');
         ids.add(profile.id); names.add(profile.name.trim().toLowerCase());
-        if (profile.maxConcurrentRuns !== undefined && !validLimit(profile.maxConcurrentRuns)) throw Error('Profile concurrency limits must be integers from 1 to 8.');
+        if (profile.maxConcurrentRuns !== undefined && !isConcurrencyLimit(profile.maxConcurrentRuns)) throw Error('Profile concurrency limits must be integers from 1 to 8 or unlimited.');
         if (profile.concurrencyGroup !== undefined && (typeof profile.concurrencyGroup !== 'string' || !groupIds.has(profile.concurrencyGroup))) throw Error('Choose an existing concurrency group or no group.');
         if (!Array.isArray(profile.args) || profile.args.some(arg => typeof arg !== 'string' || /[\x00\r\n]/.test(arg)
             || arg === '--' || /^(?:--(?:spec|project|browser|headed|e2e|component)|-[sPb])(?:=|$)/.test(arg))) throw Error('Profile arguments must be a list of strings. The runner controls --spec and --project.');
